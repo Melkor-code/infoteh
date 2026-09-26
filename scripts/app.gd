@@ -6,12 +6,10 @@ const Quadrotor = preload("res://scripts/quadrotor.gd")
 ## Меню, полигон и камеры. Физика живёт в quadrotor.gd и flight_model.gd.
 ## Окно собирается кодом, чтобы не прятать логику в файле сцены.
 
-const DEMO_WIND := 7.0
-
 var library := VehicleLibrary.new()
 var selected := 0
 var flying := false
-var wind_on := true
+var wind_speed := 7.0
 var rain_on := false
 var show_forces := true
 var camera_mode := 0
@@ -29,7 +27,8 @@ var list_box: VBoxContainer
 var detail_label: Label
 var hud_label: Label
 var warning_label: Label
-var log_label: Label
+var wind_labels: Array[Label] = []
+var wind_sliders: Array[HSlider] = []
 var status_label: Label
 var orbit_yaw := 0.6
 var orbit_pitch := -0.45
@@ -88,8 +87,6 @@ func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventKey and event.pressed and not event.echo:
 		if event.keycode == KEY_C:
 			camera_mode = (camera_mode + 1) % 3
-		elif event.keycode == KEY_T and flying:
-			_takeoff()
 		elif event.keycode == KEY_ESCAPE and flying:
 			_back_to_menu()
 
@@ -134,6 +131,18 @@ func _build_world() -> void:
 		paint.albedo_color = Color(0.85, 0.85, 0.8) if i == 0 else Color(0.55, 0.55, 0.52)
 		pad.material_override = paint
 		add_child(pad)
+	for mark in range(-4, 5):
+		if mark == 0:
+			continue
+		var line := MeshInstance3D.new()
+		var line_mesh := BoxMesh.new()
+		line_mesh.size = Vector3(80.0, 0.02, 0.12)
+		line.mesh = line_mesh
+		line.position = Vector3(0.0, 0.02, mark * 10.0)
+		var line_paint := StandardMaterial3D.new()
+		line_paint.albedo_color = Color(0.75, 0.78, 0.7)
+		line.material_override = line_paint
+		add_child(line)
 
 	var north := Label3D.new()
 	north.text = "СЕВЕР"
@@ -215,12 +224,8 @@ func _build_ui() -> void:
 	menu_box.add_child(detail_label)
 	if library.errors.size() > 0:
 		menu_box.add_child(_hint("Ошибки чтения: " + "\n".join(library.errors)))
-	var wind_box := CheckButton.new()
-	wind_box.text = "Ветер 7 м/с с северо-запада"
-	wind_box.button_pressed = true
-	wind_box.focus_mode = Control.FOCUS_NONE
-	wind_box.toggled.connect(func(on: bool) -> void: wind_on = on)
-	menu_box.add_child(wind_box)
+	menu_box.add_child(_hint("Ветер с северо-запада, м/с. 7 — пример из задания, не «шторм»."))
+	menu_box.add_child(_wind_slider())
 	var rain_box := CheckButton.new()
 	rain_box.text = "Дождь: сопротивление +15%"
 	rain_box.focus_mode = Control.FOCUS_NONE
@@ -237,38 +242,41 @@ func _build_ui() -> void:
 	start.focus_mode = Control.FOCUS_NONE
 	start.pressed.connect(_start_flight)
 	menu_box.add_child(start)
-	status_label = _hint("W/S наклон вперёд-назад, A/D в стороны, Q/E поворот, Shift/Ctrl газ. Правая кнопка мыши крутит обзор, C меняет камеру.")
+	status_label = _hint("Shift поднимает, Ctrl снижает. Высоту потом держит сам. A/D крен, Q/E поворот, W/S наклон. C — камера.")
 	menu_box.add_child(status_label)
 
-	flight_panel = _panel(Vector2(24, 24), Vector2(460, 430))
+	flight_panel = _panel(Vector2(8, 8), Vector2(1264, 52))
 	flight_panel.visible = false
+	var tight := flight_panel.get_theme_stylebox("panel") as StyleBoxFlat
+	if tight != null:
+		tight.content_margin_left = 8
+		tight.content_margin_right = 8
+		tight.content_margin_top = 4
+		tight.content_margin_bottom = 4
 	layer.add_child(flight_panel)
-	var flight_box := VBoxContainer.new()
-	flight_box.add_theme_constant_override("separation", 6)
+	var flight_box := HBoxContainer.new()
+	flight_box.add_theme_constant_override("separation", 10)
 	flight_panel.add_child(flight_box)
-	hud_label = _hint("")
+	hud_label = Label.new()
+	hud_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	flight_box.add_child(hud_label)
-	warning_label = _hint("")
-	warning_label.add_theme_color_override("font_color", Color(1.0, 0.82, 0.35))
-	flight_box.add_child(warning_label)
-	flight_box.add_child(_hint("W/S наклон, A/D в стороны, Q/E поворот, Shift/Ctrl газ. C — камера."))
-	var takeoff := Button.new()
-	takeoff.text = "Взлететь (T)"
-	takeoff.focus_mode = Control.FOCUS_NONE
-	takeoff.pressed.connect(_takeoff)
-	flight_box.add_child(takeoff)
+	flight_box.add_child(_wind_slider())
 	var back := Button.new()
-	back.text = "В меню (Esc)"
+	back.text = "Меню"
 	back.focus_mode = Control.FOCUS_NONE
 	back.pressed.connect(_back_to_menu)
 	flight_box.add_child(back)
 	var save := Button.new()
-	save.text = "Сохранить журнал полёта"
+	save.text = "Журнал"
 	save.focus_mode = Control.FOCUS_NONE
 	save.pressed.connect(_save_log)
 	flight_box.add_child(save)
-	log_label = _hint("")
-	flight_box.add_child(log_label)
+	warning_label = Label.new()
+	warning_label.position = Vector2(16, 58)
+	warning_label.size = Vector2(1100, 24)
+	warning_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	warning_label.add_theme_color_override("font_color", Color(1.0, 0.86, 0.4))
+	layer.add_child(warning_label)
 
 
 func _select(index: int) -> void:
@@ -298,25 +306,18 @@ func _start_flight() -> void:
 	craft = Quadrotor.new()
 	add_child(craft)
 	craft.setup(library.profiles[selected])
-	orbit_distance = maxf(float(craft.model.get("width", 0.4)) * 14.0, 3.0)
+	orbit_distance = maxf(float(craft.model.get("width", 0.4)) * 22.0, 12.0)
 	flying = true
 	warned = false
 	log_lines.clear()
 	_log("Старт: " + str(library.profiles[selected].get("display_name", "")))
-	if wind_on:
-		_log("Ветер 7 м/с с северо-запада")
+	if wind_speed > 0.1:
+		_log("Ветер %.0f м/с с северо-запада" % wind_speed)
 	if rain_on:
 		_log("Дождь, сопротивление +15%")
 	menu_panel.visible = false
 	flight_panel.visible = true
 	_update_hud()
-
-
-func _takeoff() -> void:
-	if craft == null:
-		return
-	craft.takeoff()
-	_log("Команда взлёта, газ на висение")
 
 
 func _back_to_menu() -> void:
@@ -326,75 +327,77 @@ func _back_to_menu() -> void:
 		craft = null
 	menu_panel.visible = true
 	flight_panel.visible = false
+	warning_label.text = ""
 	for arrow in force_arrows.values():
 		(arrow as Node3D).visible = false
 
 
 func _read_flight_input(delta: float) -> void:
-	var pitch_in := 0.0
-	var roll_in := 0.0
-	var yaw_in := 0.0
+	var pitch_goal := 0.0
+	var roll_goal := 0.0
+	var yaw_goal := 0.0
+	var climb := 0.0
 	if Input.is_physical_key_pressed(KEY_W):
-		pitch_in += 1.0
+		pitch_goal += 1.0
 	if Input.is_physical_key_pressed(KEY_S):
-		pitch_in -= 1.0
+		pitch_goal -= 1.0
 	if Input.is_physical_key_pressed(KEY_D):
-		roll_in += 1.0
+		roll_goal += 1.0
 	if Input.is_physical_key_pressed(KEY_A):
-		roll_in -= 1.0
+		roll_goal -= 1.0
 	if Input.is_physical_key_pressed(KEY_E):
-		yaw_in += 1.0
+		yaw_goal += 1.0
 	if Input.is_physical_key_pressed(KEY_Q):
-		yaw_in -= 1.0
+		yaw_goal -= 1.0
 	if Input.is_physical_key_pressed(KEY_SHIFT):
-		craft.throttle = minf(craft.throttle + 0.45 * delta, 1.0)
+		climb = 1.6
 	if Input.is_physical_key_pressed(KEY_CTRL):
-		craft.throttle = maxf(craft.throttle - 0.45 * delta, 0.0)
+		climb = -1.4
 	if Input.get_connected_joypads().size() > 0:
 		var joy: int = Input.get_connected_joypads()[0]
 		var right_x := Input.get_joy_axis(joy, JOY_AXIS_RIGHT_X)
 		var right_y := Input.get_joy_axis(joy, JOY_AXIS_RIGHT_Y)
 		var left_x := Input.get_joy_axis(joy, JOY_AXIS_LEFT_X)
 		if absf(right_x) > 0.15:
-			roll_in = right_x
+			roll_goal = right_x
 		if absf(right_y) > 0.15:
-			pitch_in = -right_y
+			pitch_goal = -right_y
 		if absf(left_x) > 0.15:
-			yaw_in = left_x
+			yaw_goal = left_x
 		var trigger_up := Input.get_joy_axis(joy, JOY_AXIS_TRIGGER_RIGHT)
 		var trigger_down := Input.get_joy_axis(joy, JOY_AXIS_TRIGGER_LEFT)
 		if trigger_up > 0.1:
-			craft.throttle = minf(craft.throttle + trigger_up * 0.5 * delta, 1.0)
-		if trigger_down > 0.1:
-			craft.throttle = maxf(craft.throttle - trigger_down * 0.5 * delta, 0.0)
-	craft.stick_pitch = clampf(pitch_in, -1.0, 1.0)
-	craft.stick_roll = clampf(roll_in, -1.0, 1.0)
-	craft.stick_yaw = clampf(yaw_in, -1.0, 1.0)
+			climb = 1.6 * trigger_up
+		elif trigger_down > 0.1:
+			climb = -1.4 * trigger_down
+	# Короткое нажатие даёт маленький наклон. Полный наклон только если удерживать клавишу.
+	var stick_step := 2.4 * delta
+	craft.stick_pitch = move_toward(craft.stick_pitch, clampf(pitch_goal, -1.0, 1.0), stick_step)
+	craft.stick_roll = move_toward(craft.stick_roll, clampf(roll_goal, -1.0, 1.0), stick_step)
+	craft.stick_yaw = move_toward(craft.stick_yaw, clampf(yaw_goal, -1.0, 1.0), stick_step)
+	craft.climb_command = climb
 
 
 func _update_hud() -> void:
 	if craft == null:
 		return
-	var air := (craft.velocity - craft.wind).length()
-	var names := ["сзади", "из кабины", "свободная"]
-	hud_label.text = "%s\nВысота: %.1f м\nСкорость относительно земли: %.1f м/с\nСкорость относительно воздуха: %.1f м/с\nГаз: %d%%\nКамера: %s" % [
+	var ground_kmh := craft.velocity.length() * 3.6
+	hud_label.text = "%s   %.1f м   %.0f км/ч   нос %s   тяга %d%%" % [
 		str(craft.profile.get("display_name", "")),
 		craft.position.y,
-		craft.velocity.length(),
-		air,
+		ground_kmh,
+		_heading_name(craft.forward()),
 		int(round(craft.throttle * 100.0)),
-		names[camera_mode],
 	]
 	warning_label.text = craft.warning
-	log_label.text = "\n".join(log_lines.slice(-4))
 
 
 func _update_forces() -> void:
-	wind_arrow.visible = wind_on
-	if wind_on:
-		var blow := _wind_vector()
-		wind_arrow.position = Vector3(10, 0.5, 10)
-		wind_arrow.look_at(wind_arrow.position + Vector3(blow.x, 0, blow.z), Vector3.UP)
+	var blow := _wind_vector()
+	wind_arrow.visible = blow.length() > 0.2
+	if wind_arrow.visible:
+		wind_arrow.position = Vector3(0.0, 0.45, 0.0)
+		wind_arrow.look_at(wind_arrow.position + Vector3(blow.x, 0.0, blow.z), Vector3.UP)
 	if craft == null:
 		return
 	var visible := show_forces and craft.motors_on
@@ -448,10 +451,10 @@ func _place_camera() -> void:
 
 
 func _wind_vector() -> Vector3:
-	if not wind_on:
+	if wind_speed <= 0.05:
 		return Vector3.ZERO
 	# Север в этой сцене — отрицательная Z. Ветер с северо-запада дует на юго-восток.
-	return Vector3(1, 0, 1).normalized() * DEMO_WIND
+	return Vector3(1, 0, 1).normalized() * wind_speed
 
 
 func _log(line: String) -> void:
@@ -469,13 +472,57 @@ func _save_log() -> void:
 	file.store_string("\n".join(log_lines))
 	file.close()
 	var full := ProjectSettings.globalize_path(path)
-	log_label.text = "Журнал записан:\n" + full
+	warning_label.text = "Журнал записан: " + full
 	_log("Журнал сохранён")
 
 
 func _show_menu() -> void:
 	menu_panel.visible = true
 	flight_panel.visible = false
+
+
+func _wind_slider() -> HBoxContainer:
+	var box := HBoxContainer.new()
+	box.add_theme_constant_override("separation", 6)
+	var caption := Label.new()
+	caption.text = "Ветер"
+	box.add_child(caption)
+	var slider := HSlider.new()
+	slider.min_value = 0.0
+	slider.max_value = 15.0
+	slider.step = 1.0
+	slider.value = wind_speed
+	slider.custom_minimum_size = Vector2(130, 16)
+	slider.focus_mode = Control.FOCUS_NONE
+	slider.value_changed.connect(func(value: float) -> void:
+		wind_speed = value
+		_refresh_wind_labels()
+	)
+	wind_sliders.append(slider)
+	box.add_child(slider)
+	var value_label := Label.new()
+	value_label.custom_minimum_size = Vector2(58, 0)
+	wind_labels.append(value_label)
+	box.add_child(value_label)
+	_refresh_wind_labels()
+	return box
+
+
+func _refresh_wind_labels() -> void:
+	var text := "%.0f м/с" % wind_speed
+	for label in wind_labels:
+		label.text = text
+	for slider in wind_sliders:
+		if absf(slider.value - wind_speed) > 0.01:
+			slider.set_value_no_signal(wind_speed)
+
+
+func _heading_name(forward: Vector3) -> String:
+	var east := forward.x
+	var north := -forward.z
+	var sector := int(round(rad_to_deg(atan2(east, north)) / 45.0))
+	var names := ["С", "СВ", "В", "ЮВ", "Ю", "ЮЗ", "З", "СЗ"]
+	return names[posmod(sector, 8)]
 
 
 func _panel(pos: Vector2, size: Vector2) -> PanelContainer:

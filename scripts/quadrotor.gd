@@ -21,6 +21,9 @@ var throttle := 0.0
 var stick_pitch := 0.0
 var stick_roll := 0.0
 var stick_yaw := 0.0
+var climb_command := 0.0
+var target_altitude := 0.2
+var altitude_hold := false
 var wind := Vector3.ZERO
 var rain := false
 var motors_on := false
@@ -48,18 +51,13 @@ func setup(next_profile: Dictionary) -> void:
 	roll_rate = 0.0
 	yaw_rate = 0.0
 	throttle = 0.0
+	climb_command = 0.0
+	target_altitude = position.y
+	altitude_hold = false
 	motors_on = false
 	airborne = false
 	warning = ""
 	rotation = Vector3.ZERO
-
-
-func takeoff() -> void:
-	motors_on = true
-	throttle = float(model.get("hover_throttle", 0.5))
-	if position.y < 1.0:
-		velocity.y = 1.4
-	airborne = true
 
 
 func step(delta: float) -> void:
@@ -71,20 +69,49 @@ func step(delta: float) -> void:
 	if rain:
 		# Дождь в паспорте не расписан. Общее допущение: сопротивление на 15% больше.
 		drag_k *= 1.15
-	var max_tilt := deg_to_rad(35.0)
+	var max_tilt := deg_to_rad(32.0)
+	# W/S уже совпадали с картинкой. A/D и Q/E в Godot на виде сзади получались зеркальными:
+	# положительный крен уезжал вправо при нажатии A, положительное рыскание крутило влево при E.
 	var target_pitch := -stick_pitch * max_tilt
-	var target_roll := stick_roll * max_tilt
-	# Стик задаёт желаемый наклон, аппарат догоняет его не мгновенно.
-	# Это первая стабилизация, не полный автопилот.
-	pitch_rate = move_toward(pitch_rate, (target_pitch - pitch) * 3.5, 5.0 * delta)
-	roll_rate = move_toward(roll_rate, (target_roll - roll) * 3.5, 5.0 * delta)
-	yaw_rate = move_toward(yaw_rate, stick_yaw * 1.2, 3.0 * delta)
-	pitch = clampf(pitch + pitch_rate * delta, -0.9, 0.9)
-	roll = clampf(roll + roll_rate * delta, -0.9, 0.9)
+	var target_roll := -stick_roll * max_tilt
+	var target_yaw_rate := -stick_yaw * 1.1
+	pitch = move_toward(pitch, target_pitch, deg_to_rad(100.0) * delta)
+	roll = move_toward(roll, target_roll, deg_to_rad(100.0) * delta)
+	yaw_rate = move_toward(yaw_rate, target_yaw_rate, 4.0 * delta)
 	yaw += yaw_rate * delta
 	rotation = Vector3(pitch, yaw, roll)
 
-	var thrust := throttle * max_thrust if motors_on else 0.0
+	var clearance := maxf(float(model.get("height", 0.1)) * 0.5, 0.04)
+	if climb_command > 0.05:
+		motors_on = true
+		altitude_hold = true
+		target_altitude += climb_command * delta
+	elif climb_command < -0.05 and motors_on:
+		target_altitude += climb_command * delta
+	elif not airborne:
+		target_altitude = position.y
+
+	var thrust := 0.0
+	if motors_on and altitude_hold:
+		# Удержание высоты само добавляет тягу, когда аппарат наклонён против ветра.
+		# Иначе наклон «съедает» вертикальную тягу, и пилот вынужден дёргать газ.
+		var desired_vy := clampf((target_altitude - position.y) * 1.3, -1.8, 2.0)
+		if absf(climb_command) > 0.05:
+			desired_vy = climb_command
+		var vertical_share := maxf(global_transform.basis.y.y, 0.4)
+		var accel := clampf((desired_vy - velocity.y) * 2.8, -6.0, 6.0)
+		thrust = clampf(mass * (FlightModel.G + accel) / vertical_share, 0.0, max_thrust)
+		throttle = thrust / max_thrust
+	else:
+		throttle = 0.0
+
+	if position.y <= clearance + 0.02 and climb_command <= 0.0 and target_altitude <= clearance + 0.25 and velocity.y <= 0.05:
+		motors_on = false
+		altitude_hold = false
+		thrust = 0.0
+		throttle = 0.0
+		target_altitude = position.y
+
 	var up := global_transform.basis.y
 	thrust_force = up * thrust
 	weight_force = Vector3(0.0, -mass * FlightModel.G, 0.0)
@@ -96,18 +123,14 @@ func step(delta: float) -> void:
 		velocity = velocity.limit_length(40.0)
 	position += velocity * delta
 
-	var clearance := maxf(float(model.get("height", 0.1)) * 0.5, 0.04)
 	if position.y <= clearance:
 		position.y = clearance
 		if velocity.y < 0.0:
 			velocity.y = 0.0
-		velocity.x *= 0.85
-		velocity.z *= 0.85
-		if throttle < 0.15:
-			airborne = false
-			motors_on = false
-			throttle = 0.0
-	elif position.y > clearance + 0.2:
+		velocity.x *= 0.92
+		velocity.z *= 0.92
+		airborne = false
+	elif position.y > clearance + 0.35:
 		airborne = true
 
 	var spin := throttle * 25.0 * delta
@@ -130,10 +153,10 @@ func _update_warning(vmax: float, airspeed: float) -> void:
 	if wind_speed > 4.0 and tilt_deg > 28.0 and airspeed > maxf(vmax * 0.75, 4.0):
 		warning = "Потеря устойчивости: уменьшите крен и тангаж, не добавляйте газ рывком."
 		return
-	if wind_speed > 3.0 and airborne and stick_pitch * stick_pitch + stick_roll * stick_roll < 0.04:
+	if wind_speed > 3.0 and airborne and stick_pitch * stick_pitch + stick_roll * stick_roll < 0.08:
 		var downwind := velocity.dot(wind.normalized())
-		if downwind > 1.5:
-			warning = "Аппарат сносит. Наклоните стик против ветра."
+		if downwind > 3.0:
+			warning = "Сносит ветром. Разверните нос против ветра и слегка наклонитесь вперёд."
 
 
 func _clear_mesh() -> void:

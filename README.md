@@ -15,6 +15,7 @@ https://github.com/Melkor-code/infoteh/tree/arena/01a0da4d-infoteh
 ## Что уже лежит в папке
 
 - `docs/kak-rabotat.md` — как устроена работа, без знания Git.
+- `docs/chto-berem-gotovym.md` — какие чужие части берём, а какой симулятор целиком не склеиваем.
 - `docs/soprotivlenie-vozduha.md` — почему форму корпуса не моделируем, а сопротивление всё равно считаем.
 - `data/vehicles/` — три аппарата и шаблон для четвёртого.
 

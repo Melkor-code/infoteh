@@ -110,7 +110,7 @@ func _physics_process(delta: float) -> void:
 	max_altitude = maxf(max_altitude, craft.position.y)
 	max_speed = maxf(max_speed, craft.velocity.length())
 	min_battery = minf(min_battery, craft.battery * 100.0)
-	min_signal = minf(min_signal, craft.signal)
+	min_signal = minf(min_signal, craft.radio)
 	max_motor_temp = maxf(max_motor_temp, craft.motor_temp)
 	_update_forces()
 	_update_hud()

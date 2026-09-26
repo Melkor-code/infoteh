@@ -33,7 +33,8 @@ var surface_kind := 0
 var slope_accel := Vector3.ZERO
 var battery := 1.0
 var motor_temp := 15.0
-var signal := 100.0
+# Нельзя назвать signal: в Godot это служебное слово, скрипт из-за него не читается.
+var radio := 100.0
 var sensor_roll := 0.0
 var sensor_pitch := 0.0
 var sensor_yaw_deg := 0.0
@@ -74,7 +75,7 @@ func setup(next_profile: Dictionary) -> void:
 	ditched = false
 	airborne = false
 	battery = 1.0
-	signal = 100.0
+	radio = 100.0
 	_hail_wait = 0.7
 	warning = ""
 	rotation = Vector3.ZERO
@@ -216,13 +217,13 @@ func _update_sensors(delta: float, airspeed: float) -> void:
 	var target_temp := air_temp + 45.0 * throttle
 	motor_temp += (target_temp - motor_temp) * clampf(cool * delta, 0.0, 0.25)
 	var dist := Vector2(position.x, position.z).length()
-	signal = clampf(100.0 - dist * 0.4, 5.0, 100.0)
+	radio = clampf(100.0 - dist * 0.4, 5.0, 100.0)
 	sensor_roll = rad_to_deg(roll) + randf_range(-0.4, 0.4)
 	sensor_pitch = rad_to_deg(pitch) + randf_range(-0.4, 0.4)
 	sensor_yaw_deg = fposmod(_compass_deg() + randf_range(-0.6, 0.6), 360.0)
 	sensor_battery = clampf(battery * 100.0 + randf_range(-0.3, 0.3), 0.0, 100.0)
 	sensor_motor_temp = motor_temp + randf_range(-0.4, 0.4)
-	sensor_signal = clampf(signal + randf_range(-1.2, 1.2), 0.0, 100.0)
+	sensor_signal = clampf(radio + randf_range(-1.2, 1.2), 0.0, 100.0)
 
 
 func _compass_deg() -> float:
@@ -263,7 +264,7 @@ func _update_warning(vmax: float, airspeed: float) -> void:
 	if battery < 0.15:
 		warning = "Батарея ниже 15%. Садитесь."
 		return
-	if signal < 25.0:
+	if radio < 25.0:
 		warning = "Слабый сигнал. Вернитесь ближе к точке старта."
 		return
 	if not motors_on and not airborne and slope_accel.length() > 0.01 and Vector2(velocity.x, velocity.z).length() > 0.25:

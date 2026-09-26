@@ -2,6 +2,16 @@ extends Node3D
 
 const VehicleLibrary = preload("res://scripts/vehicle_library.gd")
 const Quadrotor = preload("res://scripts/quadrotor.gd")
+const FlightModel = preload("res://scripts/flight_model.gd")
+
+const TERRAIN_POLYGON := 0
+const TERRAIN_SLOPE := 1
+const TERRAIN_WATER := 2
+const TERRAIN_FOREST := 3
+const SLOPE_START_Z := -4.0
+const SLOPE_GRADE := 0.08
+const FOREST_GUST_HEIGHT := 8.0
+const WATER_DOCK_RADIUS := 8.0
 
 ## Меню, полигон и камеры. Физика живёт в quadrotor.gd и flight_model.gd.
 ## Окно собирается кодом, чтобы не прятать логику в файле сцены.
@@ -10,12 +20,23 @@ var library := VehicleLibrary.new()
 var selected := 0
 var flying := false
 var wind_speed := 7.0
-var rain_on := false
+var terrain := TERRAIN_POLYGON
+var precip := 0
+var air_temp := 15.0
+var turbulence_on := false
 var show_forces := true
 var camera_mode := 0
 var craft: Quadrotor
 var camera: Camera3D
 var rain: CPUParticles3D
+var snow: CPUParticles3D
+var hail: CPUParticles3D
+var ground: MeshInstance3D
+var ground_mat: StandardMaterial3D
+var grid_root: Node3D
+var slope_visual: MeshInstance3D
+var forest_root: Node3D
+var trail_root: Node3D
 var wind_arrow: MeshInstance3D
 var force_arrows: Dictionary = {}
 var log_lines: PackedStringArray = []
@@ -26,13 +47,29 @@ var flight_panel: PanelContainer
 var list_box: VBoxContainer
 var detail_label: Label
 var hud_label: Label
+var telemetry_label: Label
 var warning_label: Label
+var terrain_hint: Label
+var temp_label: Label
 var wind_labels: Array[Label] = []
 var wind_sliders: Array[HSlider] = []
 var status_label: Label
 var orbit_yaw := 0.6
 var orbit_pitch := -0.45
 var orbit_distance := 8.0
+var gust := Vector3.ZERO
+var gust_target := Vector3.ZERO
+var gust_timer := 0.0
+var trail_timer := 0.0
+var status_flash := ""
+var status_flash_time := 0.0
+var flight_seconds := 0.0
+var max_altitude := 0.0
+var max_speed := 0.0
+var min_battery := 100.0
+var min_signal := 100.0
+var max_motor_temp := 0.0
+var report_warnings: PackedStringArray = []
 
 
 func _ready() -> void:
@@ -47,8 +84,14 @@ func _physics_process(delta: float) -> void:
 	if not flying or craft == null:
 		return
 	_read_flight_input(delta)
-	craft.wind = _wind_vector()
-	craft.rain = rain_on
+	_update_gust(delta)
+	craft.wind = _wind_vector() + gust
+	craft.air_density = FlightModel.air_density(air_temp)
+	craft.air_temp = air_temp
+	craft.precip = precip
+	craft.surface_y = _ground_height(craft.position)
+	craft.surface_kind = _surface_kind(craft.position)
+	craft.slope_accel = _slope_accel(craft.position)
 	var was_airborne := craft.airborne
 	var had_motors := craft.motors_on
 	craft.step(delta)
@@ -61,6 +104,14 @@ func _physics_process(delta: float) -> void:
 		warned = true
 	if craft.warning == "":
 		warned = false
+	if craft.warning != "" and not report_warnings.has(craft.warning):
+		report_warnings.append(craft.warning)
+	flight_seconds += delta
+	max_altitude = maxf(max_altitude, craft.position.y)
+	max_speed = maxf(max_speed, craft.velocity.length())
+	min_battery = minf(min_battery, craft.battery * 100.0)
+	min_signal = minf(min_signal, craft.signal)
+	max_motor_temp = maxf(max_motor_temp, craft.motor_temp)
 	_update_forces()
 	_update_hud()
 
@@ -69,10 +120,12 @@ func _process(_delta: float) -> void:
 	if camera == null:
 		return
 	_place_camera()
-	if rain != null:
-		rain.emitting = rain_on and flying
-		if craft != null:
-			rain.global_position = craft.global_position + Vector3(0, 12, 0)
+	if status_flash_time > 0.0:
+		status_flash_time -= _delta
+		if status_flash_time <= 0.0:
+			status_flash = ""
+	_place_precip()
+	_drop_trail(_delta)
 
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -112,13 +165,13 @@ func _build_world() -> void:
 	sun.light_energy = 1.2
 	add_child(sun)
 
-	var ground := MeshInstance3D.new()
+	ground = MeshInstance3D.new()
 	var plane := PlaneMesh.new()
 	plane.size = Vector2(240, 240)
 	ground.mesh = plane
-	var grass := StandardMaterial3D.new()
-	grass.albedo_color = Color(0.32, 0.46, 0.28)
-	ground.material_override = grass
+	ground_mat = StandardMaterial3D.new()
+	ground_mat.albedo_color = Color(0.32, 0.46, 0.28)
+	ground.material_override = ground_mat
 	add_child(ground)
 
 	for i in range(-2, 3):
@@ -131,6 +184,8 @@ func _build_world() -> void:
 		paint.albedo_color = Color(0.85, 0.85, 0.8) if i == 0 else Color(0.55, 0.55, 0.52)
 		pad.material_override = paint
 		add_child(pad)
+	grid_root = Node3D.new()
+	add_child(grid_root)
 	for mark in range(-4, 5):
 		if mark == 0:
 			continue
@@ -142,7 +197,11 @@ func _build_world() -> void:
 		var line_paint := StandardMaterial3D.new()
 		line_paint.albedo_color = Color(0.75, 0.78, 0.7)
 		line.material_override = line_paint
-		add_child(line)
+		grid_root.add_child(line)
+	_build_slope()
+	_build_forest()
+	trail_root = Node3D.new()
+	add_child(trail_root)
 
 	var north := Label3D.new()
 	north.text = "СЕВЕР"
@@ -176,22 +235,9 @@ func _build_world() -> void:
 		add_child(arrow)
 		force_arrows[force_name] = arrow
 
-	rain = CPUParticles3D.new()
-	rain.amount = 420
-	rain.lifetime = 1.4
-	rain.preprocess = 1.2
-	rain.emitting = false
-	rain.emission_shape = CPUParticles3D.EMISSION_SHAPE_BOX
-	rain.emission_box_extents = Vector3(16, 0.4, 16)
-	rain.direction = Vector3(0.2, -1, 0.15)
-	rain.spread = 6.0
-	rain.gravity = Vector3(0, -8, 0)
-	rain.initial_velocity_min = 9.0
-	rain.initial_velocity_max = 13.0
-	var drop := QuadMesh.new()
-	drop.size = Vector2(0.03, 0.28)
-	rain.mesh = drop
-	add_child(rain)
+	rain = _make_precip(420, 1.4, 9.0, 13.0, Vector2(0.03, 0.28), Color(0.75, 0.82, 0.9), Vector3(0, -8, 0))
+	snow = _make_precip(260, 2.4, 1.5, 3.0, Vector2(0.06, 0.06), Color(0.95, 0.96, 0.98), Vector3(0, -1.2, 0))
+	hail = _make_precip(70, 0.7, 16.0, 22.0, Vector2(0.07, 0.07), Color(0.85, 0.9, 0.95), Vector3(0, -18, 0))
 
 	camera = Camera3D.new()
 	camera.current = true
@@ -201,11 +247,20 @@ func _build_world() -> void:
 func _build_ui() -> void:
 	var layer := CanvasLayer.new()
 	add_child(layer)
-	menu_panel = _panel(Vector2(24, 24), Vector2(460, 640))
+	menu_panel = _panel(Vector2(24, 24), Vector2(460, 660))
 	layer.add_child(menu_panel)
+	var outer := VBoxContainer.new()
+	outer.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	outer.add_theme_constant_override("separation", 6)
+	menu_panel.add_child(outer)
+	var scroll := ScrollContainer.new()
+	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	outer.add_child(scroll)
 	var menu_box := VBoxContainer.new()
 	menu_box.add_theme_constant_override("separation", 8)
-	menu_panel.add_child(menu_box)
+	menu_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	scroll.add_child(menu_box)
 	menu_box.add_child(_title("Полётный симулятор БПЛА"))
 	menu_box.add_child(_hint("Выберите аппарат. Это не официальные модели производителей: числа из открытых паспортов."))
 	list_box = VBoxContainer.new()
@@ -224,13 +279,20 @@ func _build_ui() -> void:
 	menu_box.add_child(detail_label)
 	if library.errors.size() > 0:
 		menu_box.add_child(_hint("Ошибки чтения: " + "\n".join(library.errors)))
-	menu_box.add_child(_hint("Ветер с северо-запада, м/с. 7 — пример из задания, не «шторм»."))
+	menu_box.add_child(_hint("Ветер с северо-запада, м/с. 7 — пример из задания."))
 	menu_box.add_child(_wind_slider())
-	var rain_box := CheckButton.new()
-	rain_box.text = "Дождь: сопротивление +15%"
-	rain_box.focus_mode = Control.FOCUS_NONE
-	rain_box.toggled.connect(func(on: bool) -> void: rain_on = on)
-	menu_box.add_child(rain_box)
+	menu_box.add_child(_hint("Местность"))
+	menu_box.add_child(_terrain_picker())
+	terrain_hint = _hint("")
+	menu_box.add_child(terrain_hint)
+	menu_box.add_child(_hint("Осадки"))
+	menu_box.add_child(_precip_picker())
+	menu_box.add_child(_temp_slider())
+	var turb_box := CheckButton.new()
+	turb_box.text = "Турбулентность: порывы к ветру"
+	turb_box.focus_mode = Control.FOCUS_NONE
+	turb_box.toggled.connect(func(on: bool) -> void: turbulence_on = on)
+	menu_box.add_child(turb_box)
 	var force_box := CheckButton.new()
 	force_box.text = "Показать силы: тяга, вес, сопротивление"
 	force_box.button_pressed = true
@@ -241,11 +303,12 @@ func _build_ui() -> void:
 	start.text = "Начать полёт"
 	start.focus_mode = Control.FOCUS_NONE
 	start.pressed.connect(_start_flight)
-	menu_box.add_child(start)
-	status_label = _hint("Shift поднимает, Ctrl снижает. Высоту потом держит сам. A/D крен, Q/E поворот, W/S наклон. C — камера.")
-	menu_box.add_child(status_label)
+	outer.add_child(start)
+	status_label = _hint("Shift поднимает, Ctrl снижает. Высоту держит сам. A влево, E вправо.")
+	outer.add_child(status_label)
+	_apply_terrain()
 
-	flight_panel = _panel(Vector2(8, 8), Vector2(1264, 52))
+	flight_panel = _panel(Vector2(8, 8), Vector2(1264, 74))
 	flight_panel.visible = false
 	var tight := flight_panel.get_theme_stylebox("panel") as StyleBoxFlat
 	if tight != null:
@@ -254,25 +317,31 @@ func _build_ui() -> void:
 		tight.content_margin_top = 4
 		tight.content_margin_bottom = 4
 	layer.add_child(flight_panel)
-	var flight_box := HBoxContainer.new()
-	flight_box.add_theme_constant_override("separation", 10)
+	var flight_box := VBoxContainer.new()
+	flight_box.add_theme_constant_override("separation", 2)
 	flight_panel.add_child(flight_box)
+	var flight_row := HBoxContainer.new()
+	flight_row.add_theme_constant_override("separation", 10)
+	flight_box.add_child(flight_row)
 	hud_label = Label.new()
 	hud_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	flight_box.add_child(hud_label)
-	flight_box.add_child(_wind_slider())
+	flight_row.add_child(hud_label)
+	flight_row.add_child(_wind_slider())
 	var back := Button.new()
 	back.text = "Меню"
 	back.focus_mode = Control.FOCUS_NONE
 	back.pressed.connect(_back_to_menu)
-	flight_box.add_child(back)
+	flight_row.add_child(back)
 	var save := Button.new()
-	save.text = "Журнал"
+	save.text = "Отчёт"
 	save.focus_mode = Control.FOCUS_NONE
 	save.pressed.connect(_save_log)
-	flight_box.add_child(save)
+	flight_row.add_child(save)
+	telemetry_label = Label.new()
+	telemetry_label.add_theme_font_size_override("font_size", 14)
+	flight_box.add_child(telemetry_label)
 	warning_label = Label.new()
-	warning_label.position = Vector2(16, 58)
+	warning_label.position = Vector2(16, 88)
 	warning_label.size = Vector2(1100, 24)
 	warning_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	warning_label.add_theme_color_override("font_color", Color(1.0, 0.86, 0.4))
@@ -306,15 +375,27 @@ func _start_flight() -> void:
 	craft = Quadrotor.new()
 	add_child(craft)
 	craft.setup(library.profiles[selected])
+	craft.motor_temp = air_temp
+	craft.air_temp = air_temp
 	orbit_distance = maxf(float(craft.model.get("width", 0.4)) * 22.0, 12.0)
 	flying = true
 	warned = false
 	log_lines.clear()
+	report_warnings.clear()
+	flight_seconds = 0.0
+	max_altitude = craft.position.y
+	max_speed = 0.0
+	min_battery = 100.0
+	min_signal = 100.0
+	max_motor_temp = air_temp
+	status_flash = ""
+	gust = Vector3.ZERO
+	gust_target = Vector3.ZERO
+	_clear_trail()
 	_log("Старт: " + str(library.profiles[selected].get("display_name", "")))
-	if wind_speed > 0.1:
-		_log("Ветер %.0f м/с с северо-запада" % wind_speed)
-	if rain_on:
-		_log("Дождь, сопротивление +15%")
+	_log("Местность: " + _terrain_name())
+	_log("Ветер %.0f м/с с северо-запада, воздух %.0f °C" % [wind_speed, air_temp])
+	_log("Осадки: " + _precip_name())
 	menu_panel.visible = false
 	flight_panel.visible = true
 	_update_hud()
@@ -328,6 +409,9 @@ func _back_to_menu() -> void:
 	menu_panel.visible = true
 	flight_panel.visible = false
 	warning_label.text = ""
+	telemetry_label.text = ""
+	status_flash = ""
+	_clear_trail()
 	for arrow in force_arrows.values():
 		(arrow as Node3D).visible = false
 
@@ -389,7 +473,22 @@ func _update_hud() -> void:
 		_heading_name(craft.forward()),
 		int(round(craft.throttle * 100.0)),
 	]
-	warning_label.text = craft.warning
+	var gust_note := ""
+	if gust.length() > 0.3:
+		gust_note = "   порывы %.1f" % gust.length()
+	telemetry_label.text = "крен %.0f°   тангаж %.0f°   курс %.0f°   батарея %.0f%%   моторы %.0f°   сигнал %.0f%%%s" % [
+		craft.sensor_roll,
+		craft.sensor_pitch,
+		craft.sensor_yaw_deg,
+		craft.sensor_battery,
+		craft.sensor_motor_temp,
+		craft.sensor_signal,
+		gust_note,
+	]
+	if status_flash_time > 0.0:
+		warning_label.text = status_flash
+	else:
+		warning_label.text = craft.warning
 
 
 func _update_forces() -> void:
@@ -464,21 +563,316 @@ func _log(line: String) -> void:
 
 
 func _save_log() -> void:
-	var path := "user://flight_log.txt"
+	var path := "user://flight_report.txt"
 	var file := FileAccess.open(path, FileAccess.WRITE)
 	if file == null:
-		status_label.text = "Не удалось записать журнал."
+		status_flash = "Не удалось записать отчёт."
+		status_flash_time = 4.0
 		return
-	file.store_string("\n".join(log_lines))
+	var lines: PackedStringArray = []
+	lines.append("Отчёт полёта")
+	lines.append("Аппарат: " + str(library.profiles[selected].get("display_name", "")))
+	lines.append("Местность: " + _terrain_name())
+	lines.append("Ветер: %.0f м/с с северо-запада" % wind_speed)
+	lines.append("Осадки: " + _precip_name())
+	lines.append("Температура воздуха: %.0f °C" % air_temp)
+	lines.append("Плотность воздуха: %.3f кг/м³" % FlightModel.air_density(air_temp))
+	lines.append("Турбулентность: " + ("да" if turbulence_on else "нет"))
+	lines.append("Время в полёте: %.0f с" % flight_seconds)
+	lines.append("Максимальная высота: %.1f м" % max_altitude)
+	lines.append("Максимальная скорость: %.1f м/с" % max_speed)
+	lines.append("Минимальный заряд: %.0f%%" % min_battery)
+	lines.append("Минимальный сигнал: %.0f%%" % min_signal)
+	lines.append("Максимальная температура моторов: %.0f °C" % max_motor_temp)
+	lines.append("Предупреждения:")
+	if report_warnings.is_empty():
+		lines.append("- нет")
+	else:
+		for item in report_warnings:
+			lines.append("- " + item)
+	lines.append("")
+	lines.append("Журнал:")
+	lines.append_array(log_lines)
+	file.store_string("\n".join(lines))
 	file.close()
 	var full := ProjectSettings.globalize_path(path)
-	warning_label.text = "Журнал записан: " + full
-	_log("Журнал сохранён")
+	status_flash = "Отчёт записан: " + full
+	status_flash_time = 6.0
+	_log("Отчёт сохранён")
 
 
 func _show_menu() -> void:
 	menu_panel.visible = true
 	flight_panel.visible = false
+
+
+func _terrain_picker() -> OptionButton:
+	var picker := OptionButton.new()
+	picker.focus_mode = Control.FOCUS_NONE
+	picker.add_item("Ровный полигон", TERRAIN_POLYGON)
+	picker.add_item("Склон на север", TERRAIN_SLOPE)
+	picker.add_item("Вода с причалом", TERRAIN_WATER)
+	picker.add_item("Лес", TERRAIN_FOREST)
+	picker.selected = terrain
+	picker.item_selected.connect(func(index: int) -> void:
+		terrain = index
+		_apply_terrain()
+	)
+	return picker
+
+
+func _precip_picker() -> OptionButton:
+	var picker := OptionButton.new()
+	picker.focus_mode = Control.FOCUS_NONE
+	picker.add_item("Нет", 0)
+	picker.add_item("Дождь: сопротивление +15%", 1)
+	picker.add_item("Снег: сопротивление +10% и тяга −8%", 2)
+	picker.add_item("Град: редкие удары", 3)
+	picker.selected = precip
+	picker.item_selected.connect(func(index: int) -> void:
+		precip = index
+	)
+	return picker
+
+
+func _temp_slider() -> HBoxContainer:
+	var box := HBoxContainer.new()
+	box.add_theme_constant_override("separation", 6)
+	var caption := Label.new()
+	caption.text = "Воздух"
+	box.add_child(caption)
+	var slider := HSlider.new()
+	slider.min_value = -10.0
+	slider.max_value = 40.0
+	slider.step = 1.0
+	slider.value = air_temp
+	slider.custom_minimum_size = Vector2(130, 16)
+	slider.focus_mode = Control.FOCUS_NONE
+	slider.value_changed.connect(func(value: float) -> void:
+		air_temp = value
+		if temp_label != null:
+			temp_label.text = "%.0f °C" % air_temp
+	)
+	box.add_child(slider)
+	temp_label = Label.new()
+	temp_label.custom_minimum_size = Vector2(58, 0)
+	temp_label.text = "%.0f °C" % air_temp
+	box.add_child(temp_label)
+	return box
+
+
+func _apply_terrain() -> void:
+	if ground_mat != null:
+		ground_mat.albedo_color = Color(0.16, 0.38, 0.62) if terrain == TERRAIN_WATER else Color(0.32, 0.46, 0.28)
+	if grid_root != null:
+		grid_root.visible = terrain == TERRAIN_POLYGON or terrain == TERRAIN_FOREST
+	if slope_visual != null:
+		slope_visual.visible = terrain == TERRAIN_SLOPE
+	if forest_root != null:
+		forest_root.visible = terrain == TERRAIN_FOREST
+	if terrain_hint == null:
+		return
+	match terrain:
+		TERRAIN_SLOPE:
+			terrain_hint.text = "Склон: на земле аппарат сползает на юг. В воздухе склон не тянет."
+		TERRAIN_WATER:
+			terrain_hint.text = "Вода: сесть можно только на причал у старта. Касание воды глушит моторы."
+		TERRAIN_FOREST:
+			terrain_hint.text = "Лес: ниже 8 м порывы сильнее. Деревья картинка, в форму корпуса не входят."
+		_:
+			terrain_hint.text = "Ровный полигон: земля держит, как в прошлом запуске."
+
+
+func _build_slope() -> void:
+	slope_visual = Node3D.new()
+	add_child(slope_visual)
+	# Ступеньки, а не повёрнутая плоскость: север в сцене — отрицательная Z, и высота растёт туда же, куда формула.
+	var paint := StandardMaterial3D.new()
+	paint.albedo_color = Color(0.40, 0.48, 0.30)
+	for step in 9:
+		var z := -8.0 - float(step) * 8.0
+		var height := maxf(_ground_height(Vector3(0.0, 0.0, z)), 0.08)
+		var ramp := MeshInstance3D.new()
+		var mesh := BoxMesh.new()
+		mesh.size = Vector3(54.0, height, 7.6)
+		ramp.mesh = mesh
+		ramp.position = Vector3(0.0, height * 0.5, z)
+		ramp.material_override = paint
+		slope_visual.add_child(ramp)
+	var sign := Label3D.new()
+	sign.text = "СКЛОН"
+	sign.position = Vector3(0, 4.2, -30)
+	sign.font_size = 48
+	sign.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	slope_visual.add_child(sign)
+	slope_visual.visible = false
+
+
+func _build_forest() -> void:
+	forest_root = Node3D.new()
+	add_child(forest_root)
+	var spots: Array[Vector3] = [
+		Vector3(14, 0, -12), Vector3(22, 0, -28), Vector3(-16, 0, -18),
+		Vector3(-24, 0, 8), Vector3(18, 0, 16), Vector3(-12, 0, 22),
+		Vector3(8, 0, -36), Vector3(-8, 0, -42),
+	]
+	for spot in spots:
+		var trunk := MeshInstance3D.new()
+		var trunk_mesh := CylinderMesh.new()
+		trunk_mesh.top_radius = 0.15
+		trunk_mesh.bottom_radius = 0.22
+		trunk_mesh.height = 2.2
+		trunk.mesh = trunk_mesh
+		trunk.position = spot + Vector3(0, 1.1, 0)
+		trunk.material_override = _flat_color(Color(0.35, 0.24, 0.14))
+		forest_root.add_child(trunk)
+		var crown := MeshInstance3D.new()
+		var crown_mesh := SphereMesh.new()
+		crown_mesh.radius = 1.5
+		crown_mesh.height = 3.0
+		crown.mesh = crown_mesh
+		crown.position = spot + Vector3(0, 3.0, 0)
+		crown.material_override = _flat_color(Color(0.15, 0.36, 0.18))
+		forest_root.add_child(crown)
+	forest_root.visible = false
+
+
+func _make_precip(amount: int, life: float, speed_min: float, speed_max: float, drop_size: Vector2, color: Color, gravity: Vector3) -> CPUParticles3D:
+	var particles := CPUParticles3D.new()
+	particles.amount = amount
+	particles.lifetime = life
+	particles.preprocess = 0.4
+	particles.emitting = false
+	particles.emission_shape = CPUParticles3D.EMISSION_SHAPE_BOX
+	particles.emission_box_extents = Vector3(16, 0.4, 16)
+	particles.direction = Vector3(0.15, -1, 0.1)
+	particles.spread = 8.0
+	particles.gravity = gravity
+	particles.initial_velocity_min = speed_min
+	particles.initial_velocity_max = speed_max
+	var drop := QuadMesh.new()
+	drop.size = drop_size
+	var material := StandardMaterial3D.new()
+	material.albedo_color = color
+	material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	drop.material = material
+	particles.mesh = drop
+	add_child(particles)
+	return particles
+
+
+func _place_precip() -> void:
+	var origin := Vector3(0, 14, 0)
+	if craft != null:
+		origin = craft.global_position + Vector3(0, 12, 0)
+	for particles in [rain, snow, hail]:
+		if particles == null:
+			continue
+		particles.global_position = origin
+	if rain != null:
+		rain.emitting = flying and precip == 1
+	if snow != null:
+		snow.emitting = flying and precip == 2
+	if hail != null:
+		hail.emitting = flying and precip == 3
+
+
+func _drop_trail(delta: float) -> void:
+	if trail_root == null or not flying or craft == null or not craft.airborne:
+		return
+	trail_timer -= delta
+	if trail_timer > 0.0:
+		return
+	trail_timer = 0.35
+	var mark := MeshInstance3D.new()
+	var sphere := SphereMesh.new()
+	sphere.radius = 0.07
+	sphere.height = 0.14
+	mark.mesh = sphere
+	mark.position = craft.position
+	mark.material_override = _flat_color(Color(0.95, 0.78, 0.2))
+	trail_root.add_child(mark)
+	if trail_root.get_child_count() > 70:
+		var oldest := trail_root.get_child(0)
+		trail_root.remove_child(oldest)
+		oldest.free()
+
+
+func _clear_trail() -> void:
+	if trail_root == null:
+		return
+	while trail_root.get_child_count() > 0:
+		var child := trail_root.get_child(0)
+		trail_root.remove_child(child)
+		child.free()
+
+
+func _update_gust(delta: float) -> void:
+	gust_timer -= delta
+	if gust_timer <= 0.0:
+		gust_timer = randf_range(0.45, 1.15)
+		var amp := 0.0
+		if turbulence_on:
+			amp += 0.3 * wind_speed + 0.25
+		if terrain == TERRAIN_FOREST and craft != null and craft.airborne and craft.position.y < FOREST_GUST_HEIGHT:
+			amp += 1.5
+		amp = minf(amp, 2.5)
+		var dir := Vector3(randf_range(-1.0, 1.0), 0.0, randf_range(-1.0, 1.0))
+		if dir.length() < 0.05:
+			dir = Vector3(1, 0, 0)
+		gust_target = dir.normalized() * amp
+	gust = gust.move_toward(gust_target, 3.5 * delta)
+
+
+func _ground_height(pos: Vector3) -> float:
+	if terrain != TERRAIN_SLOPE or pos.z > SLOPE_START_Z:
+		return 0.0
+	return maxf(-pos.z + SLOPE_START_Z, 0.0) * SLOPE_GRADE
+
+
+func _surface_kind(pos: Vector3) -> int:
+	if terrain != TERRAIN_WATER:
+		return 0
+	if Vector2(pos.x, pos.z).length() <= WATER_DOCK_RADIUS:
+		return 0
+	return 1
+
+
+func _slope_accel(pos: Vector3) -> Vector3:
+	if terrain != TERRAIN_SLOPE or pos.z > SLOPE_START_Z:
+		return Vector3.ZERO
+	return Vector3(0.0, 0.0, FlightModel.G * SLOPE_GRADE)
+
+
+func _terrain_name() -> String:
+	match terrain:
+		TERRAIN_SLOPE:
+			return "склон на север"
+		TERRAIN_WATER:
+			return "вода с причалом"
+		TERRAIN_FOREST:
+			return "лес"
+		_:
+			return "ровный полигон"
+
+
+func _precip_name() -> String:
+	match precip:
+		1:
+			return "дождь"
+		2:
+			return "снег"
+		3:
+			return "град"
+		_:
+			return "нет"
+
+
+func _flat_color(color: Color) -> StandardMaterial3D:
+	var material := StandardMaterial3D.new()
+	material.albedo_color = color
+	material.roughness = 0.8
+	return material
 
 
 func _wind_slider() -> HBoxContainer:

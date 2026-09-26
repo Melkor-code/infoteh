@@ -13,6 +13,17 @@ const CD := 1.0
 const BOX_FILL := 0.35
 const THRUST_TO_WEIGHT := 2.0
 const CRUISE_TILT_DEG := 25.0
+# Осадки в паспортах не расписаны. Это допущения, и они разные, не одна и та же надбавка.
+const RAIN_DRAG := 1.15
+const SNOW_DRAG := 1.10
+const SNOW_THRUST := 0.92
+const HAIL_DRAG := 1.04
+
+
+static func air_density(temp_c: float) -> float:
+	# Давление как у земли, плотность обратно пропорциональна абсолютной температуре.
+	# При 15 °C получается 1,225 кг/м³. Это не прогноз погоды.
+	return RHO * 288.15 / (temp_c + 273.15)
 
 
 static func read_number(node: Variant, fallback: float = 0.0) -> float:

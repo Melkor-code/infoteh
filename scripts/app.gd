@@ -34,7 +34,7 @@ var hail: CPUParticles3D
 var ground: MeshInstance3D
 var ground_mat: StandardMaterial3D
 var grid_root: Node3D
-var slope_visual: MeshInstance3D
+var slope_visual: Node3D
 var forest_root: Node3D
 var trail_root: Node3D
 var wind_arrow: MeshInstance3D
@@ -356,8 +356,8 @@ func _select(index: int) -> void:
 	var profile: Dictionary = library.profiles[selected]
 	var lines := library.summary_lines(profile)
 	var model: Dictionary = profile.get("_model", {})
-	var scale := float(model.get("drag_scale", 1.0))
-	lines.append("Сопротивление подогнано под паспортную скорость, множитель к площади: %.1f." % scale)
+	var drag_scale := float(model.get("drag_scale", 1.0))
+	lines.append("Сопротивление подогнано под паспортную скорость, множитель к площади: %.1f." % drag_scale)
 	lines.append("Форму корпуса не считаем. Тяга моторов в паспорте не указана: взяли запас в 2 веса.")
 	detail_label.text = "\n".join(lines)
 	for i in list_box.get_child_count():
@@ -499,16 +499,16 @@ func _update_forces() -> void:
 		wind_arrow.look_at(wind_arrow.position + Vector3(blow.x, 0.0, blow.z), Vector3.UP)
 	if craft == null:
 		return
-	var visible := show_forces and craft.motors_on
-	_place_force("thrust", craft.thrust_force, visible)
-	_place_force("drag", craft.drag_force, visible)
-	_place_force("weight", craft.weight_force, visible)
+	var show_arrows := show_forces and craft.motors_on
+	_place_force("thrust", craft.thrust_force, show_arrows)
+	_place_force("drag", craft.drag_force, show_arrows)
+	_place_force("weight", craft.weight_force, show_arrows)
 
 
-func _place_force(force_name: String, force: Vector3, visible: bool) -> void:
+func _place_force(force_name: String, force: Vector3, show_arrow: bool) -> void:
 	var arrow := force_arrows[force_name] as MeshInstance3D
 	var length := force.length()
-	if not visible or length < 0.05:
+	if not show_arrow or length < 0.05:
 		arrow.visible = false
 		return
 	arrow.visible = true
@@ -519,8 +519,8 @@ func _place_force(force_name: String, force: Vector3, visible: bool) -> void:
 	if absf(direction.dot(up)) > 0.95:
 		up = Vector3.RIGHT
 	var side := direction.cross(up).normalized()
-	var basis := Basis(side, direction, side.cross(direction).normalized())
-	arrow.transform = Transform3D(basis.scaled(Vector3(1.0, shown_len, 1.0)), craft.position + Vector3(0, 0.3, 0) + direction * shown_len * 0.5)
+	var arrow_basis := Basis(side, direction, side.cross(direction).normalized())
+	arrow.transform = Transform3D(arrow_basis.scaled(Vector3(1.0, shown_len, 1.0)), craft.position + Vector3(0, 0.3, 0) + direction * shown_len * 0.5)
 
 
 func _place_camera() -> void:
@@ -699,12 +699,12 @@ func _build_slope() -> void:
 		ramp.position = Vector3(0.0, height * 0.5, z)
 		ramp.material_override = paint
 		slope_visual.add_child(ramp)
-	var sign := Label3D.new()
-	sign.text = "СКЛОН"
-	sign.position = Vector3(0, 4.2, -30)
-	sign.font_size = 48
-	sign.billboard = BaseMaterial3D.BILLBOARD_ENABLED
-	slope_visual.add_child(sign)
+	var slope_label := Label3D.new()
+	slope_label.text = "СКЛОН"
+	slope_label.position = Vector3(0, 4.2, -30)
+	slope_label.font_size = 48
+	slope_label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	slope_visual.add_child(slope_label)
 	slope_visual.visible = false
 
 

@@ -1,4 +1,3 @@
-class_name VehicleLibrary
 extends RefCounted
 
 const FlightModel = preload("res://scripts/flight_model.gd")

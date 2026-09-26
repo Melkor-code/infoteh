@@ -1,4 +1,3 @@
-class_name Quadrotor
 extends Node3D
 
 const FlightModel = preload("res://scripts/flight_model.gd")
@@ -202,8 +201,8 @@ func _drain_battery(delta: float, _mass: float) -> void:
 	# Паспорт даёт время полёта, но не ток. Допущение: на висении батарея садится за это время.
 	var flight_time := maxf(FlightModel.read_number(profile.get("flight_time_s"), 600.0), 30.0)
 	var hover := maxf(float(model.get("hover_throttle", 0.5)), 0.2)
-	var load := maxf(throttle, 0.08) / hover
-	battery = maxf(battery - load * delta / flight_time, 0.0)
+	var draw := maxf(throttle, 0.08) / hover
+	battery = maxf(battery - draw * delta / flight_time, 0.0)
 	if battery <= 0.02:
 		motors_on = false
 		altitude_hold = false

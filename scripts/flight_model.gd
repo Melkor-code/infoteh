@@ -1,4 +1,3 @@
-class_name FlightModel
 extends RefCounted
 
 ## Общие правила полёта. Не паспорт конкретного аппарата.

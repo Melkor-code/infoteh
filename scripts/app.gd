@@ -291,7 +291,7 @@ func _build_ui() -> void:
 	start.focus_mode = Control.FOCUS_NONE
 	start.pressed.connect(_start_flight)
 	outer.add_child(start)
-	status_label = _hint("Shift поднимает, Ctrl снижает. Высоту держит сам. A влево, E вправо.")
+	status_label = _hint("Shift поднимает, Ctrl снижает. Стрелка влево и вправо поворачивают, как Q и E.")
 	outer.add_child(status_label)
 	_apply_terrain()
 
@@ -433,9 +433,10 @@ func _read_flight_input(delta: float) -> void:
 		roll_goal += 1.0
 	if Input.is_physical_key_pressed(KEY_A):
 		roll_goal -= 1.0
-	if Input.is_physical_key_pressed(KEY_E):
+	# Q/E оставлены. Стрелки — тот же поворот, чтобы второй рукой крутить нос, не отпуская W/A/S/D.
+	if Input.is_physical_key_pressed(KEY_E) or Input.is_physical_key_pressed(KEY_RIGHT):
 		yaw_goal += 1.0
-	if Input.is_physical_key_pressed(KEY_Q):
+	if Input.is_physical_key_pressed(KEY_Q) or Input.is_physical_key_pressed(KEY_LEFT):
 		yaw_goal -= 1.0
 	if Input.is_physical_key_pressed(KEY_SHIFT):
 		climb = 1.6

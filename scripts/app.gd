@@ -28,7 +28,6 @@ var terrain := TERRAIN_POLYGON
 var precip := 0
 var air_temp := 15.0
 var turbulence_on := false
-var show_forces := true
 var camera_mode := 0
 var craft: Quadrotor
 var camera: Camera3D
@@ -39,9 +38,7 @@ var ground: MeshInstance3D
 var ground_mat: StandardMaterial3D
 var slope_visual: Node3D
 var forest_root: Node3D
-var trail_root: Node3D
-var wind_arrow: MeshInstance3D
-var force_arrows: Dictionary = {}
+var wind_arrow: Node3D
 var log_lines: PackedStringArray = []
 var warned := false
 
@@ -64,7 +61,6 @@ var orbit_distance := 8.0
 var gust := Vector3.ZERO
 var gust_target := Vector3.ZERO
 var gust_timer := 0.0
-var trail_timer := 0.0
 var status_flash := ""
 var status_flash_time := 0.0
 var flight_seconds := 0.0
@@ -116,7 +112,7 @@ func _physics_process(delta: float) -> void:
 	min_battery = minf(min_battery, craft.battery * 100.0)
 	min_signal = minf(min_signal, craft.radio)
 	max_motor_temp = maxf(max_motor_temp, craft.motor_temp)
-	_update_forces()
+	_update_wind_arrow()
 	_update_hud()
 
 
@@ -129,7 +125,6 @@ func _process(_delta: float) -> void:
 		if status_flash_time <= 0.0:
 			status_flash = ""
 	_place_precip()
-	_drop_trail(_delta)
 	_place_camera_cone()
 
 
@@ -191,9 +186,6 @@ func _build_world() -> void:
 	_build_hill()
 	_build_pond()
 	_build_forest()
-	trail_root = Node3D.new()
-	add_child(trail_root)
-
 	var north := Label3D.new()
 	north.text = "СЕВЕР"
 	north.position = Vector3(0, 6.2, -72)
@@ -202,29 +194,7 @@ func _build_world() -> void:
 	north.billboard = BaseMaterial3D.BILLBOARD_ENABLED
 	add_child(north)
 
-	wind_arrow = MeshInstance3D.new()
-	var arrow_mesh := BoxMesh.new()
-	arrow_mesh.size = Vector3(0.35, 0.08, 6.0)
-	wind_arrow.mesh = arrow_mesh
-	var arrow_mat := StandardMaterial3D.new()
-	arrow_mat.albedo_color = Color(0.35, 0.7, 0.95)
-	wind_arrow.material_override = arrow_mat
-	wind_arrow.position = Vector3(8, 0.4, 8)
-	add_child(wind_arrow)
-
-	for force_name in ["thrust", "drag", "weight"]:
-		var arrow := MeshInstance3D.new()
-		var cylinder := CylinderMesh.new()
-		cylinder.top_radius = 0.04
-		cylinder.bottom_radius = 0.04
-		cylinder.height = 1.0
-		arrow.mesh = cylinder
-		var material := StandardMaterial3D.new()
-		material.albedo_color = _force_color(force_name)
-		arrow.material_override = material
-		arrow.visible = false
-		add_child(arrow)
-		force_arrows[force_name] = arrow
+	_build_wind_arrow()
 
 	rain = _make_precip(420, 1.4, 9.0, 13.0, Vector2(0.03, 0.28), Color(0.75, 0.82, 0.9), Vector3(0, -8, 0))
 	snow = _make_precip(260, 2.4, 1.5, 3.0, Vector2(0.06, 0.06), Color(0.95, 0.96, 0.98), Vector3(0, -1.2, 0))
@@ -285,12 +255,6 @@ func _build_ui() -> void:
 	turb_box.focus_mode = Control.FOCUS_NONE
 	turb_box.toggled.connect(func(on: bool) -> void: turbulence_on = on)
 	menu_box.add_child(turb_box)
-	var force_box := CheckButton.new()
-	force_box.text = "Показать силы: тяга, вес, сопротивление"
-	force_box.button_pressed = true
-	force_box.focus_mode = Control.FOCUS_NONE
-	force_box.toggled.connect(func(on: bool) -> void: show_forces = on)
-	menu_box.add_child(force_box)
 	var start := Button.new()
 	start.text = "Начать полёт"
 	start.focus_mode = Control.FOCUS_NONE
@@ -399,7 +363,6 @@ func _start_flight() -> void:
 	status_flash = ""
 	gust = Vector3.ZERO
 	gust_target = Vector3.ZERO
-	_clear_trail()
 	_log("Старт: " + str(library.profiles[selected].get("display_name", "")))
 	_log("Местность: " + _terrain_name())
 	_log("Ветер %.0f м/с, откуда %s, воздух %.0f °C" % [wind_speed, _wind_from_name(), air_temp])
@@ -420,9 +383,6 @@ func _back_to_menu() -> void:
 	for key in hud_slots:
 		(hud_slots[key] as Label).text = ""
 	status_flash = ""
-	_clear_trail()
-	for arrow in force_arrows.values():
-		(arrow as Node3D).visible = false
 
 
 func _read_flight_input(delta: float) -> void:
@@ -493,36 +453,43 @@ func _update_hud() -> void:
 		warning_label.text = craft.warning
 
 
-func _update_forces() -> void:
+func _build_wind_arrow() -> void:
+	# Короткая стрелка сбоку от площадки. Раньше была длинная плашка через старт.
+	wind_arrow = Node3D.new()
+	var paint := _flat_color(Color(0.35, 0.7, 0.95))
+	var shaft := MeshInstance3D.new()
+	var shaft_mesh := BoxMesh.new()
+	shaft_mesh.size = Vector3(0.06, 0.04, 0.9)
+	shaft.mesh = shaft_mesh
+	shaft.position = Vector3(0.0, 0.02, 0.05)
+	shaft.material_override = paint
+	wind_arrow.add_child(shaft)
+	var head := MeshInstance3D.new()
+	var cone := CylinderMesh.new()
+	cone.top_radius = 0.0
+	cone.bottom_radius = 0.1
+	cone.height = 0.28
+	head.mesh = cone
+	# look_at направляет минус Z по ветру, поэтому остриё смотрит туда же.
+	head.rotation_degrees = Vector3(-90.0, 0.0, 0.0)
+	head.position = Vector3(0.0, 0.02, -0.48)
+	head.material_override = paint
+	wind_arrow.add_child(head)
+	add_child(wind_arrow)
+	_update_wind_arrow()
+
+
+func _update_wind_arrow() -> void:
+	if wind_arrow == null:
+		return
 	var blow := _wind_vector()
 	wind_arrow.visible = blow.length() > 0.2
-	if wind_arrow.visible:
-		wind_arrow.position = Vector3(0.0, 0.45, 0.0)
-		wind_arrow.look_at(wind_arrow.position + Vector3(blow.x, 0.0, blow.z), Vector3.UP)
-	if craft == null:
+	if not wind_arrow.visible:
 		return
-	var show_arrows := show_forces and craft.motors_on
-	_place_force("thrust", craft.thrust_force, show_arrows)
-	_place_force("drag", craft.drag_force, show_arrows)
-	_place_force("weight", craft.weight_force, show_arrows)
-
-
-func _place_force(force_name: String, force: Vector3, show_arrow: bool) -> void:
-	var arrow := force_arrows[force_name] as MeshInstance3D
-	var length := force.length()
-	if not show_arrow or length < 0.05:
-		arrow.visible = false
-		return
-	arrow.visible = true
-	var shown := force / maxf(float(craft.model.get("weight", 1.0)), 0.1) * 1.4
-	var shown_len := maxf(shown.length(), 0.15)
-	var direction := shown.normalized()
-	var up := Vector3.UP
-	if absf(direction.dot(up)) > 0.95:
-		up = Vector3.RIGHT
-	var side := direction.cross(up).normalized()
-	var arrow_basis := Basis(side, direction, side.cross(direction).normalized())
-	arrow.transform = Transform3D(arrow_basis.scaled(Vector3(1.0, shown_len, 1.0)), craft.position + Vector3(0, 0.3, 0) + direction * shown_len * 0.5)
+	var spot := Vector3(6.5, 0.0, 4.0)
+	spot.y = _sample_height(spot.x, spot.z) + 0.12
+	wind_arrow.position = spot
+	wind_arrow.look_at(spot + Vector3(blow.x, 0.0, blow.z), Vector3.UP)
 
 
 func _place_camera() -> void:
@@ -830,36 +797,6 @@ func _place_precip() -> void:
 		hail.emitting = flying and precip == 3
 
 
-func _drop_trail(delta: float) -> void:
-	if trail_root == null or not flying or craft == null or not craft.airborne:
-		return
-	trail_timer -= delta
-	if trail_timer > 0.0:
-		return
-	trail_timer = 0.35
-	var mark := MeshInstance3D.new()
-	var sphere := SphereMesh.new()
-	sphere.radius = 0.07
-	sphere.height = 0.14
-	mark.mesh = sphere
-	mark.position = craft.position
-	mark.material_override = _flat_color(Color(0.95, 0.78, 0.2))
-	trail_root.add_child(mark)
-	if trail_root.get_child_count() > 70:
-		var oldest := trail_root.get_child(0)
-		trail_root.remove_child(oldest)
-		oldest.free()
-
-
-func _clear_trail() -> void:
-	if trail_root == null:
-		return
-	while trail_root.get_child_count() > 0:
-		var child := trail_root.get_child(0)
-		trail_root.remove_child(child)
-		child.free()
-
-
 func _update_gust(delta: float) -> void:
 	gust_timer -= delta
 	if gust_timer <= 0.0:
@@ -1158,11 +1095,4 @@ func _hint(text: String) -> Label:
 	return label
 
 
-func _force_color(force_name: String) -> Color:
-	match force_name:
-		"thrust":
-			return Color(0.3, 0.85, 0.45)
-		"drag":
-			return Color(0.35, 0.65, 1.0)
-		_:
-			return Color(0.95, 0.45, 0.35)
+

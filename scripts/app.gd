@@ -23,6 +23,7 @@ var library := VehicleLibrary.new()
 var selected := 0
 var flying := false
 var wind_speed := 7.0
+var wind_from := 7
 var terrain := TERRAIN_POLYGON
 var precip := 0
 var air_temp := 15.0
@@ -54,6 +55,8 @@ var terrain_hint: Label
 var temp_label: Label
 var wind_labels: Array[Label] = []
 var wind_sliders: Array[HSlider] = []
+var wind_pickers: Array[OptionButton] = []
+var camera_cone: MeshInstance3D
 var status_label: Label
 var orbit_yaw := 0.6
 var orbit_pitch := -0.45
@@ -127,6 +130,7 @@ func _process(_delta: float) -> void:
 			status_flash = ""
 	_place_precip()
 	_drop_trail(_delta)
+	_place_camera_cone()
 
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -229,6 +233,7 @@ func _build_world() -> void:
 	camera = Camera3D.new()
 	camera.current = true
 	add_child(camera)
+	_build_camera_cone()
 
 
 func _build_ui() -> void:
@@ -266,7 +271,7 @@ func _build_ui() -> void:
 	menu_box.add_child(detail_label)
 	if library.errors.size() > 0:
 		menu_box.add_child(_hint("Ошибки чтения: " + "\n".join(library.errors)))
-	menu_box.add_child(_hint("Ветер с северо-запада, м/с. 7 — пример из задания."))
+	menu_box.add_child(_hint("Ветер: скорость и откуда дует. 7 м/с с северо-запада — пример из задания."))
 	menu_box.add_child(_wind_slider())
 	menu_box.add_child(_hint("Местность"))
 	menu_box.add_child(_terrain_picker())
@@ -397,7 +402,7 @@ func _start_flight() -> void:
 	_clear_trail()
 	_log("Старт: " + str(library.profiles[selected].get("display_name", "")))
 	_log("Местность: " + _terrain_name())
-	_log("Ветер %.0f м/с с северо-запада, воздух %.0f °C" % [wind_speed, air_temp])
+	_log("Ветер %.0f м/с, откуда %s, воздух %.0f °C" % [wind_speed, _wind_from_name(), air_temp])
 	_log("Осадки: " + _precip_name())
 	menu_panel.visible = false
 	flight_panel.visible = true
@@ -549,8 +554,62 @@ func _place_camera() -> void:
 func _wind_vector() -> Vector3:
 	if wind_speed <= 0.05:
 		return Vector3.ZERO
-	# Север в этой сцене — отрицательная Z. Ветер с северо-запада дует на юго-восток.
-	return Vector3(1, 0, 1).normalized() * wind_speed
+	# 0 — север, дальше по часовой. Ветер летит из этой стороны, не в неё.
+	# Север в сцене — отрицательная Z. Северо-запад поэтому даёт поток на юго-восток.
+	var deg := float(wind_from) * 45.0
+	var rad := deg_to_rad(deg)
+	return Vector3(-sin(rad), 0.0, cos(rad)) * wind_speed
+
+
+func _wind_from_name() -> String:
+	var names := ["С", "СВ", "В", "ЮВ", "Ю", "ЮЗ", "З", "СЗ"]
+	return names[clampi(wind_from, 0, names.size() - 1)]
+
+
+func _build_camera_cone() -> void:
+	camera_cone = MeshInstance3D.new()
+	var mesh := CylinderMesh.new()
+	mesh.top_radius = 1.0
+	mesh.bottom_radius = 0.04
+	mesh.height = 9.0
+	camera_cone.mesh = mesh
+	var paint := StandardMaterial3D.new()
+	paint.albedo_color = Color(0.35, 0.9, 0.5, 0.22)
+	paint.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	paint.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	paint.cull_mode = BaseMaterial3D.CULL_DISABLED
+	camera_cone.material_override = paint
+	camera_cone.visible = false
+	add_child(camera_cone)
+
+
+func _place_camera_cone() -> void:
+	if camera_cone == null:
+		return
+	var fov := 0.0
+	if craft != null:
+		fov = FlightModel.read_number(craft.profile.get("camera_fov_deg"), 0.0)
+	# Из кабины конус закрыл бы весь обзор: камера стоит в его узком конце.
+	var show := flying and craft != null and fov > 1.0 and camera_mode != 1
+	camera_cone.visible = show
+	if not show:
+		return
+	var length := 9.0
+	var radius := length * tan(deg_to_rad(fov) * 0.5)
+	var mesh := camera_cone.mesh as CylinderMesh
+	if mesh != null:
+		mesh.height = length
+		mesh.top_radius = radius
+		mesh.bottom_radius = 0.04
+	var forward := craft.forward()
+	var origin := craft.global_position + craft.global_transform.basis.y * 0.12
+	var side := forward.cross(Vector3.UP)
+	if side.length() < 0.05:
+		side = Vector3.RIGHT
+	side = side.normalized()
+	var up := side.cross(forward).normalized()
+	# Цилиндр вытянут по своей Y. Широкий конец смотрит вперёд, узкий — у камеры.
+	camera_cone.global_transform = Transform3D(Basis(side, forward, up), origin + forward * length * 0.5)
 
 
 func _log(line: String) -> void:
@@ -570,7 +629,7 @@ func _save_log() -> void:
 	lines.append("Отчёт полёта")
 	lines.append("Аппарат: " + str(library.profiles[selected].get("display_name", "")))
 	lines.append("Местность: " + _terrain_name())
-	lines.append("Ветер: %.0f м/с с северо-запада" % wind_speed)
+	lines.append("Ветер: %.0f м/с, откуда %s" % [wind_speed, _wind_from_name()])
 	lines.append("Осадки: " + _precip_name())
 	lines.append("Температура воздуха: %.0f °C" % air_temp)
 	lines.append("Плотность воздуха: %.3f кг/м³" % FlightModel.air_density(air_temp))
@@ -1002,6 +1061,7 @@ func _wind_slider() -> HBoxContainer:
 	var caption := Label.new()
 	caption.text = "Ветер"
 	box.add_child(caption)
+	box.add_child(_wind_direction_picker())
 	var slider := HSlider.new()
 	slider.min_value = 0.0
 	slider.max_value = 15.0
@@ -1021,6 +1081,30 @@ func _wind_slider() -> HBoxContainer:
 	box.add_child(value_label)
 	_refresh_wind_labels()
 	return box
+
+
+func _wind_direction_picker() -> OptionButton:
+	var picker := OptionButton.new()
+	picker.focus_mode = Control.FOCUS_NONE
+	var names := ["С", "СВ", "В", "ЮВ", "Ю", "ЮЗ", "З", "СЗ"]
+	for index in names.size():
+		picker.add_item(names[index], index)
+	picker.selected = wind_from
+	picker.item_selected.connect(func(index: int) -> void:
+		wind_from = index
+		_refresh_wind_dirs()
+	)
+	wind_pickers.append(picker)
+	return picker
+
+
+func _refresh_wind_dirs() -> void:
+	for picker in wind_pickers:
+		if picker.selected == wind_from:
+			continue
+		picker.set_block_signals(true)
+		picker.selected = wind_from
+		picker.set_block_signals(false)
 
 
 func _refresh_wind_labels() -> void:

@@ -48,8 +48,7 @@ var menu_panel: PanelContainer
 var flight_panel: PanelContainer
 var list_box: VBoxContainer
 var detail_label: Label
-var hud_label: Label
-var telemetry_label: Label
+var hud_slots: Dictionary = {}
 var warning_label: Label
 var terrain_hint: Label
 var temp_label: Label
@@ -168,11 +167,10 @@ func _build_world() -> void:
 	add_child(sun)
 
 	ground = MeshInstance3D.new()
-	var plane := PlaneMesh.new()
-	plane.size = Vector2(240, 240)
-	ground.mesh = plane
+	ground.mesh = _build_height_mesh()
 	ground_mat = StandardMaterial3D.new()
-	ground_mat.albedo_color = Color(0.32, 0.46, 0.28)
+	ground_mat.vertex_color_use_as_albedo = true
+	ground_mat.roughness = 0.92
 	ground.material_override = ground_mat
 	add_child(ground)
 
@@ -297,7 +295,7 @@ func _build_ui() -> void:
 	outer.add_child(status_label)
 	_apply_terrain()
 
-	flight_panel = _panel(Vector2(8, 8), Vector2(1264, 74))
+	flight_panel = _panel(Vector2(8, 8), Vector2(1264, 96))
 	flight_panel.visible = false
 	var tight := flight_panel.get_theme_stylebox("panel") as StyleBoxFlat
 	if tight != null:
@@ -310,11 +308,16 @@ func _build_ui() -> void:
 	flight_box.add_theme_constant_override("separation", 2)
 	flight_panel.add_child(flight_box)
 	var flight_row := HBoxContainer.new()
-	flight_row.add_theme_constant_override("separation", 10)
+	flight_row.add_theme_constant_override("separation", 8)
 	flight_box.add_child(flight_row)
-	hud_label = Label.new()
-	hud_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	flight_row.add_child(hud_label)
+	flight_row.add_child(_slot("name", 210.0))
+	flight_row.add_child(_pair("высота", "alt", 52.0))
+	flight_row.add_child(_pair("скорость", "spd", 68.0))
+	flight_row.add_child(_pair("нос", "nose", 32.0))
+	flight_row.add_child(_pair("тяга", "thr", 40.0))
+	var spacer := Control.new()
+	spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	flight_row.add_child(spacer)
 	flight_row.add_child(_wind_slider())
 	var back := Button.new()
 	back.text = "Меню"
@@ -326,11 +329,18 @@ func _build_ui() -> void:
 	save.focus_mode = Control.FOCUS_NONE
 	save.pressed.connect(_save_log)
 	flight_row.add_child(save)
-	telemetry_label = Label.new()
-	telemetry_label.add_theme_font_size_override("font_size", 14)
-	flight_box.add_child(telemetry_label)
+	var telemetry_row := HBoxContainer.new()
+	telemetry_row.add_theme_constant_override("separation", 8)
+	flight_box.add_child(telemetry_row)
+	telemetry_row.add_child(_pair("крен", "roll", 40.0))
+	telemetry_row.add_child(_pair("тангаж", "pitch", 40.0))
+	telemetry_row.add_child(_pair("курс", "yaw", 40.0))
+	telemetry_row.add_child(_pair("батарея", "bat", 40.0))
+	telemetry_row.add_child(_pair("моторы", "mot", 40.0))
+	telemetry_row.add_child(_pair("сигнал", "sig", 40.0))
+	telemetry_row.add_child(_pair("порывы", "gust", 36.0))
 	warning_label = Label.new()
-	warning_label.position = Vector2(16, 88)
+	warning_label.position = Vector2(16, 108)
 	warning_label.size = Vector2(1100, 24)
 	warning_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	warning_label.add_theme_color_override("font_color", Color(1.0, 0.86, 0.4))
@@ -402,7 +412,8 @@ func _back_to_menu() -> void:
 	menu_panel.visible = true
 	flight_panel.visible = false
 	warning_label.text = ""
-	telemetry_label.text = ""
+	for key in hud_slots:
+		(hud_slots[key] as Label).text = ""
 	status_flash = ""
 	_clear_trail()
 	for arrow in force_arrows.values():
@@ -458,26 +469,18 @@ func _read_flight_input(delta: float) -> void:
 func _update_hud() -> void:
 	if craft == null:
 		return
-	var ground_kmh := craft.velocity.length() * 3.6
-	hud_label.text = "%s   %.1f м   %.0f км/ч   нос %s   тяга %d%%" % [
-		str(craft.profile.get("display_name", "")),
-		craft.position.y,
-		ground_kmh,
-		_heading_name(craft.forward()),
-		int(round(craft.throttle * 100.0)),
-	]
-	var gust_note := ""
-	if gust.length() > 0.3:
-		gust_note = "   порывы %.1f" % gust.length()
-	telemetry_label.text = "крен %.0f°   тангаж %.0f°   курс %.0f°   батарея %.0f%%   моторы %.0f°   сигнал %.0f%%%s" % [
-		craft.sensor_roll,
-		craft.sensor_pitch,
-		craft.sensor_yaw_deg,
-		craft.sensor_battery,
-		craft.sensor_motor_temp,
-		craft.sensor_signal,
-		gust_note,
-	]
+	_set_slot("name", str(craft.profile.get("display_name", "")))
+	_set_slot("alt", "%.1f м" % craft.position.y)
+	_set_slot("spd", "%.0f км/ч" % (craft.velocity.length() * 3.6))
+	_set_slot("nose", _heading_name(craft.forward()))
+	_set_slot("thr", "%d%%" % int(round(craft.throttle * 100.0)))
+	_set_slot("roll", "%.0f°" % craft.sensor_roll)
+	_set_slot("pitch", "%.0f°" % craft.sensor_pitch)
+	_set_slot("yaw", "%.0f°" % craft.sensor_yaw_deg)
+	_set_slot("bat", "%.0f%%" % craft.sensor_battery)
+	_set_slot("mot", "%.0f°" % craft.sensor_motor_temp)
+	_set_slot("sig", "%.0f%%" % craft.sensor_signal)
+	_set_slot("gust", "%.1f" % gust.length())
 	if status_flash_time > 0.0:
 		warning_label.text = status_flash
 	else:
@@ -663,16 +666,7 @@ func _apply_terrain() -> void:
 func _build_hill() -> void:
 	slope_visual = Node3D.new()
 	add_child(slope_visual)
-	var cone := MeshInstance3D.new()
-	var mesh := CylinderMesh.new()
-	mesh.top_radius = 0.0
-	mesh.bottom_radius = HILL_RADIUS
-	mesh.height = HILL_PEAK
-	cone.mesh = mesh
-	cone.position = HILL_CENTER + Vector3(0.0, HILL_PEAK * 0.5, 0.0)
-	cone.material_override = _flat_color(Color(0.38, 0.50, 0.28))
-	slope_visual.add_child(cone)
-	_add_sign("ГОРКА", HILL_CENTER + Vector3(0.0, HILL_PEAK + 1.2, 0.0), slope_visual)
+	_add_sign("ГОРКА", HILL_CENTER + Vector3(0.0, HILL_PEAK + 1.4, 0.0), slope_visual)
 
 
 func _build_pond() -> void:
@@ -706,13 +700,14 @@ func _build_forest() -> void:
 		Vector3(-18, 0, 2), Vector3(-34, 0, -6),
 	]
 	for spot in spots:
+		var placed := Vector3(spot.x, _sample_height(spot.x, spot.z), spot.z)
 		var trunk := MeshInstance3D.new()
 		var trunk_mesh := CylinderMesh.new()
 		trunk_mesh.top_radius = 0.22
 		trunk_mesh.bottom_radius = 0.32
 		trunk_mesh.height = 3.4
 		trunk.mesh = trunk_mesh
-		trunk.position = spot + Vector3(0, 1.7, 0)
+		trunk.position = placed + Vector3(0, 1.7, 0)
 		trunk.material_override = _flat_color(Color(0.35, 0.24, 0.14))
 		forest_root.add_child(trunk)
 		var crown := MeshInstance3D.new()
@@ -720,7 +715,7 @@ func _build_forest() -> void:
 		crown_mesh.radius = 2.1
 		crown_mesh.height = 3.6
 		crown.mesh = crown_mesh
-		crown.position = spot + Vector3(0, 4.2, 0)
+		crown.position = placed + Vector3(0, 4.2, 0)
 		crown.material_override = _flat_color(Color(0.15, 0.38, 0.16))
 		forest_root.add_child(crown)
 	_add_sign("ЛЕС", Vector3(FOREST_CENTER.x, 7.0, FOREST_CENTER.y), forest_root)
@@ -823,11 +818,38 @@ func _update_gust(delta: float) -> void:
 
 
 func _ground_height(pos: Vector3) -> float:
-	var flat := Vector2(pos.x - HILL_CENTER.x, pos.z - HILL_CENTER.z)
-	var dist := flat.length()
+	return _sample_height(pos.x, pos.z)
+
+
+func _sample_height(x: float, z: float) -> float:
+	var h := _wave_height(x, z) + _hill_only(x, z) + _pond_dent(x, z)
+	var pad_d := Vector2(x, z).length()
+	if pad_d < 9.0:
+		h = lerpf(0.0, h, smoothstep(4.0, 9.0, pad_d))
+	if x >= 18.0 and x <= 30.0 and absf(z - POND_CENTER.y) <= 1.6:
+		h = 0.05
+	return h
+
+
+func _wave_height(x: float, z: float) -> float:
+	return 0.45 * sin(x * 0.085) * cos(z * 0.07) + 0.22 * sin(x * 0.19 + z * 0.13)
+
+
+func _hill_only(x: float, z: float) -> float:
+	var dist := Vector2(x - HILL_CENTER.x, z - HILL_CENTER.z).length()
 	if dist >= HILL_RADIUS:
 		return 0.0
-	return HILL_PEAK * (1.0 - dist / HILL_RADIUS)
+	var t := 1.0 - dist / HILL_RADIUS
+	return HILL_PEAK * t * t
+
+
+func _pond_dent(x: float, z: float) -> float:
+	var dist := Vector2(x, z).distance_to(POND_CENTER)
+	var edge := POND_RADIUS + 6.0
+	if dist >= edge:
+		return 0.0
+	var u := 1.0 - dist / edge
+	return -1.2 * u * u
 
 
 func _surface_kind(pos: Vector3) -> int:
@@ -839,12 +861,15 @@ func _surface_kind(pos: Vector3) -> int:
 
 
 func _slope_accel(pos: Vector3) -> Vector3:
-	if _ground_height(pos) < 0.2:
+	if _hill_only(pos.x, pos.z) < 0.35:
 		return Vector3.ZERO
 	var away := Vector3(pos.x - HILL_CENTER.x, 0.0, pos.z - HILL_CENTER.z)
-	if away.length() < 0.4:
+	if away.length() < 1.2:
 		return Vector3.ZERO
-	return away.normalized() * FlightModel.G * (HILL_PEAK / HILL_RADIUS)
+	var dist := away.length()
+	var t := 1.0 - dist / HILL_RADIUS
+	var grade := 2.0 * HILL_PEAK / HILL_RADIUS * t
+	return away.normalized() * FlightModel.G * grade * 0.7
 
 
 func _on_pier(pos: Vector3) -> bool:
@@ -896,6 +921,78 @@ func _flat_color(color: Color) -> StandardMaterial3D:
 	material.albedo_color = color
 	material.roughness = 0.8
 	return material
+
+
+func _pair(caption: String, key: String, width: float) -> HBoxContainer:
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 4)
+	var title := Label.new()
+	title.text = caption
+	title.add_theme_font_size_override("font_size", 14)
+	title.add_theme_color_override("font_color", Color(0.78, 0.82, 0.86))
+	row.add_child(title)
+	row.add_child(_slot(key, width))
+	return row
+
+
+func _slot(key: String, width: float) -> Control:
+	var frame := Control.new()
+	frame.custom_minimum_size = Vector2(width, 18)
+	frame.clip_contents = true
+	var label := Label.new()
+	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	label.add_theme_font_size_override("font_size", 14)
+	label.position = Vector2.ZERO
+	label.size = Vector2(width, 18)
+	frame.add_child(label)
+	hud_slots[key] = label
+	return frame
+
+
+func _set_slot(key: String, text: String) -> void:
+	var label := hud_slots.get(key) as Label
+	if label != null:
+		label.text = text
+
+
+func _build_height_mesh() -> ArrayMesh:
+	var tool := SurfaceTool.new()
+	tool.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var cells := 72
+	var span := 180.0
+	var step := span / float(cells)
+	var origin := -span * 0.5
+	for iz in cells:
+		for ix in cells:
+			var x0 := origin + float(ix) * step
+			var z0 := origin + float(iz) * step
+			var x1 := x0 + step
+			var z1 := z0 + step
+			_add_ground_vertex(tool, x0, z0)
+			_add_ground_vertex(tool, x1, z0)
+			_add_ground_vertex(tool, x1, z1)
+			_add_ground_vertex(tool, x0, z0)
+			_add_ground_vertex(tool, x1, z1)
+			_add_ground_vertex(tool, x0, z1)
+	tool.generate_normals()
+	return tool.commit()
+
+
+func _add_ground_vertex(tool: SurfaceTool, x: float, z: float) -> void:
+	var h := _sample_height(x, z)
+	tool.set_color(_ground_tint(h, x, z))
+	tool.add_vertex(Vector3(x, h, z))
+
+
+func _ground_tint(h: float, x: float, z: float) -> Color:
+	var grass := Color(0.30, 0.46, 0.24)
+	var sand := Color(0.64, 0.58, 0.38)
+	var rock := Color(0.46, 0.47, 0.42)
+	var shore := clampf((Vector2(x, z).distance_to(POND_CENTER) - POND_RADIUS) / 6.0, 0.0, 1.0)
+	var tint := sand.lerp(grass, shore)
+	if h > 2.2:
+		tint = tint.lerp(rock, clampf((h - 2.2) / 2.4, 0.0, 1.0))
+	return tint * (0.94 + 0.06 * sin(x * 0.55 + z * 0.8))
 
 
 func _wind_slider() -> HBoxContainer:

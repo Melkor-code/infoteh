@@ -71,6 +71,9 @@ var max_speed := 0.0
 var min_battery := 100.0
 var min_signal := 100.0
 var max_motor_temp := 0.0
+var max_tilt_deg := 0.0
+var sample_timer := 0.0
+var sample_lines: PackedStringArray = []
 var report_warnings: PackedStringArray = []
 
 
@@ -114,6 +117,11 @@ func _physics_process(delta: float) -> void:
 	min_battery = minf(min_battery, craft.battery * 100.0)
 	min_signal = minf(min_signal, craft.radio)
 	max_motor_temp = maxf(max_motor_temp, craft.motor_temp)
+	max_tilt_deg = maxf(max_tilt_deg, rad_to_deg(Vector2(craft.pitch, craft.roll).length()))
+	sample_timer -= delta
+	if sample_timer <= 0.0:
+		sample_timer = 1.0
+		_take_sample()
 	_update_wind_arrow()
 	_update_hud()
 
@@ -369,6 +377,9 @@ func _start_flight() -> void:
 	min_battery = 100.0
 	min_signal = 100.0
 	max_motor_temp = air_temp
+	max_tilt_deg = 0.0
+	sample_timer = 0.0
+	sample_lines = PackedStringArray()
 	status_flash = ""
 	gust = Vector3.ZERO
 	gust_target = Vector3.ZERO
@@ -554,16 +565,86 @@ func _log(line: String) -> void:
 		log_lines.remove_at(0)
 
 
+func _take_sample() -> void:
+	if craft == null or sample_lines.size() >= 1200:
+		return
+	# Крен, тангаж, курс, батарея, моторы и сигнал — с шумом датчика, как на экране.
+	# Высота и скорость — из модели, без этого шума.
+	sample_lines.append("%.1f;%.2f;%.2f;%.1f;%.1f;%.1f;%.1f;%.1f;%.1f;%.2f;%.1f;%.2f" % [
+		flight_seconds,
+		craft.position.y,
+		craft.velocity.length(),
+		craft.sensor_roll,
+		craft.sensor_pitch,
+		craft.sensor_yaw_deg,
+		craft.sensor_battery,
+		craft.sensor_motor_temp,
+		craft.sensor_signal,
+		craft.throttle,
+		wind_speed,
+		gust.length(),
+	])
+
+
+func _origin_label(node: Variant) -> String:
+	if typeof(node) != TYPE_DICTIONARY:
+		return "нет в карточке"
+	match str(node.get("origin", "")):
+		"passport":
+			return "паспорт"
+		"assumption":
+			return "допущение"
+		"missing":
+			return "нет в паспорте"
+		_:
+			return "нет в карточке"
+
+
+func _tagged_number(node: Variant, pattern: String, unit: String) -> String:
+	if FlightModel.read_number(node, -1.0) < 0.0:
+		return "нет в карточке (" + _origin_label(node) + ")"
+	return (pattern % FlightModel.read_number(node)) + " " + unit + " (" + _origin_label(node) + ")"
+
+
+func _report_conclusion(profile: Dictionary, described: Dictionary) -> String:
+	var vmax := float(described.get("vmax", 0.0))
+	var lost := false
+	for item in report_warnings:
+		if item.find("Потеря устойчивости") >= 0:
+			lost = true
+	if lost:
+		return "Модель показала потерю устойчивости. Рекомендация, которая была на экране, записана ниже. Это не лётное испытание настоящего аппарата."
+	if wind_speed > 0.5 and vmax > 0.1 and wind_speed > vmax:
+		return "Ветер сильнее паспортной скорости этого аппарата. Модель не обещает ход против такого ветра. Это не лётное испытание настоящего аппарата."
+	if flight_seconds < 3.0:
+		return "Полёт короче 3 секунд, для вывода мало данных. Это не лётное испытание настоящего аппарата."
+	return "Предупреждения о потере устойчивости не было. Это учебный расчёт, не лётное испытание настоящего аппарата."
+
+
 func _save_log() -> void:
-	var path := "user://flight_report.txt"
-	var file := FileAccess.open(path, FileAccess.WRITE)
-	if file == null:
+	if craft != null and sample_lines.is_empty():
+		_take_sample()
+	var text_path := "user://flight_report.txt"
+	var table_path := "user://flight_samples.csv"
+	var text_file := FileAccess.open(text_path, FileAccess.WRITE)
+	if text_file == null:
 		status_flash = "Не удалось записать отчёт."
 		status_flash_time = 4.0
 		return
+	var profile: Dictionary = library.profiles[selected]
+	var described := FlightModel.describe(profile)
 	var lines: PackedStringArray = []
 	lines.append("Отчёт полёта")
-	lines.append("Аппарат: " + str(library.profiles[selected].get("display_name", "")))
+	lines.append("Учебная модель. Не официальная модель производителя и не лётное испытание.")
+	var disclaimer := str(profile.get("disclaimer", ""))
+	if disclaimer != "":
+		lines.append(disclaimer)
+	lines.append("Аппарат: " + str(profile.get("display_name", "")))
+	lines.append("Масса: " + _tagged_number(profile.get("mass_kg"), "%.3f", "кг"))
+	lines.append("Паспортная скорость: " + _tagged_number(profile.get("max_airspeed_m_s"), "%.1f", "м/с"))
+	lines.append("Запас тяги: 2 веса. В паспортах тяги нет, это общее допущение модели.")
+	if bool(described.get("limited_by_passport_speed", false)):
+		lines.append("Сопротивление подогнано под паспортную скорость. Множитель %.1f — допущение." % float(described.get("drag_scale", 1.0)))
 	lines.append("Местность: " + _terrain_name())
 	lines.append("Ветер: %.0f м/с, откуда %s" % [wind_speed, _wind_from_name()])
 	lines.append("Осадки: " + _precip_name())
@@ -573,23 +654,38 @@ func _save_log() -> void:
 	lines.append("Время в полёте: %.0f с" % flight_seconds)
 	lines.append("Максимальная высота: %.1f м" % max_altitude)
 	lines.append("Максимальная скорость: %.1f м/с" % max_speed)
+	lines.append("Максимальный наклон модели: %.0f°" % max_tilt_deg)
 	lines.append("Минимальный заряд: %.0f%%" % min_battery)
 	lines.append("Минимальный сигнал: %.0f%%" % min_signal)
 	lines.append("Максимальная температура моторов: %.0f °C" % max_motor_temp)
-	lines.append("Предупреждения:")
+	lines.append("Вывод: " + _report_conclusion(profile, described))
+	lines.append("Сообщения и рекомендации:")
 	if report_warnings.is_empty():
 		lines.append("- нет")
 	else:
 		for item in report_warnings:
 			lines.append("- " + item)
+	lines.append("Таблица: flight_samples.csv в той же папке. Точка раз в секунду, разделитель — точка с запятой.")
+	lines.append("В таблице крен, тангаж, курс, батарея, моторы и сигнал — датчики с шумом. Высота и скорость — из модели.")
+	if sample_lines.size() >= 1200:
+		lines.append("Таблица обрезана: записаны первые 20 минут.")
 	lines.append("")
 	lines.append("Журнал:")
 	lines.append_array(log_lines)
-	file.store_string("\n".join(lines))
-	file.close()
-	var full := ProjectSettings.globalize_path(path)
-	status_flash = "Отчёт записан: " + full
-	status_flash_time = 6.0
+	text_file.store_string("\n".join(lines))
+	text_file.close()
+	var table := FileAccess.open(table_path, FileAccess.WRITE)
+	if table == null:
+		status_flash = "Текст записан, таблицу записать не удалось."
+		status_flash_time = 5.0
+		return
+	table.store_line("t_s;alt_m;speed_ms;roll_deg;pitch_deg;yaw_deg;battery_pct;motor_c;signal_pct;throttle;wind_ms;gust_ms")
+	for row in sample_lines:
+		table.store_line(row)
+	table.close()
+	var folder := ProjectSettings.globalize_path("user://")
+	status_flash = "Отчёт и таблица: " + folder
+	status_flash_time = 8.0
 	_log("Отчёт сохранён")
 
 

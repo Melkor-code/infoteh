@@ -27,6 +27,7 @@ var wind := Vector3.ZERO
 var air_density := 1.225
 var air_temp := 15.0
 var precip := 0
+var canopy := 0.0
 var surface_y := 0.0
 var surface_kind := 0
 var slope_accel := Vector3.ZERO
@@ -95,6 +96,9 @@ func step(delta: float) -> void:
 		max_thrust *= FlightModel.SNOW_THRUST
 	elif precip == 3:
 		drag_k *= FlightModel.HAIL_DRAG
+	# Крона — допущение, не паспорт. Листва не стена: она сильно растит сопротивление.
+	if canopy > 0.2:
+		drag_k *= 1.0 + 1.8 * canopy
 	var max_tilt := deg_to_rad(32.0)
 	# W/S уже совпадали с картинкой. A/D и Q/E в Godot на виде сзади получались зеркальными:
 	# положительный крен уезжал вправо при нажатии A, положительное рыскание крутило влево при E.
@@ -216,7 +220,8 @@ func _update_sensors(delta: float, airspeed: float) -> void:
 	var target_temp := air_temp + 45.0 * throttle
 	motor_temp += (target_temp - motor_temp) * clampf(cool * delta, 0.0, 0.25)
 	var dist := Vector2(position.x, position.z).length()
-	radio = clampf(100.0 - dist * 0.4, 5.0, 100.0)
+	# Поле стало просторнее, поэтому сигнал падает медленнее. На краю дорожки он ещё заметен.
+	radio = clampf(100.0 - dist * 0.16, 8.0, 100.0)
 	sensor_roll = rad_to_deg(roll) + randf_range(-0.4, 0.4)
 	sensor_pitch = rad_to_deg(pitch) + randf_range(-0.4, 0.4)
 	sensor_yaw_deg = fposmod(_compass_deg() + randf_range(-0.6, 0.6), 360.0)

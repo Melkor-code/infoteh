@@ -3,18 +3,13 @@ extends Node3D
 const VehicleLibrary = preload("res://scripts/vehicle_library.gd")
 const Quadrotor = preload("res://scripts/quadrotor.gd")
 const FlightModel = preload("res://scripts/flight_model.gd")
+const RangeField = preload("res://scripts/range_field.gd")
 
 const TERRAIN_POLYGON := 0
 const TERRAIN_SLOPE := 1
 const TERRAIN_WATER := 2
 const TERRAIN_FOREST := 3
-const HILL_CENTER := Vector3(0.0, 0.0, -42.0)
-const HILL_RADIUS := 26.0
-const HILL_PEAK := 5.0
-const POND_CENTER := Vector2(34.0, 12.0)
-const POND_RADIUS := 11.0
-const FOREST_CENTER := Vector2(-28.0, 4.0)
-const FOREST_RADIUS := 16.0
+const TERRAIN_COURSE := 4
 
 ## Меню, полигон и камеры. Физика живёт в quadrotor.gd и flight_model.gd.
 ## Окно собирается кодом, чтобы не прятать логику в файле сцены.
@@ -34,10 +29,7 @@ var camera: Camera3D
 var rain: CPUParticles3D
 var snow: CPUParticles3D
 var hail: CPUParticles3D
-var ground: MeshInstance3D
-var ground_mat: StandardMaterial3D
-var slope_visual: Node3D
-var forest_root: Node3D
+var field
 var wind_arrow: Node3D
 var log_lines: PackedStringArray = []
 var warned := false
@@ -94,12 +86,21 @@ func _physics_process(delta: float) -> void:
 	craft.air_density = FlightModel.air_density(air_temp)
 	craft.air_temp = air_temp
 	craft.precip = precip
-	craft.surface_y = _ground_height(craft.position)
-	craft.surface_kind = _surface_kind(craft.position)
-	craft.slope_accel = _slope_accel(craft.position)
+	craft.surface_y = field.sample_height(craft.position.x, craft.position.z)
+	craft.surface_kind = field.surface_kind(craft.position)
+	craft.slope_accel = field.slope_accel(craft.position)
+	craft.canopy = field.canopy_at(craft.position)
 	var was_airborne := craft.airborne
 	var had_motors := craft.motors_on
 	craft.step(delta)
+	var body := maxf(float(craft.model.get("width", 0.4)) * 0.5, 0.2)
+	var hit: Dictionary = field.resolve(craft.position, craft.velocity, body)
+	craft.position = hit["pos"]
+	craft.velocity = hit["vel"]
+	if str(hit["note"]) != "" and not craft.ditched and craft.battery > 0.02:
+		craft.warning = str(hit["note"])
+	elif craft.canopy > 0.35 and craft.airborne and craft.warning == "":
+		craft.warning = "Крона мешает полёту: сопротивление выше. Поднимитесь над листвой или облетите рощу."
 	if not was_airborne and craft.airborne:
 		_log("Взлёт")
 	if had_motors and not craft.motors_on:
@@ -107,6 +108,9 @@ func _physics_process(delta: float) -> void:
 	if craft.warning != "" and not warned:
 		_log(craft.warning)
 		warned = true
+		if craft.warning.begins_with("Столкновение") or craft.warning.begins_with("Крона"):
+			status_flash = craft.warning
+			status_flash_time = 3.5
 	if craft.warning == "":
 		warned = false
 	if craft.warning != "" and not report_warnings.has(craft.warning):
@@ -183,34 +187,9 @@ func _build_world() -> void:
 	sun.light_energy = 1.2
 	add_child(sun)
 
-	ground = MeshInstance3D.new()
-	ground.mesh = _build_height_mesh()
-	ground_mat = StandardMaterial3D.new()
-	ground_mat.vertex_color_use_as_albedo = true
-	ground_mat.roughness = 0.92
-	ground.material_override = ground_mat
-	add_child(ground)
-
-	for i in range(-2, 3):
-		var pad := MeshInstance3D.new()
-		var pad_mesh := BoxMesh.new()
-		pad_mesh.size = Vector3(1.2, 0.04, 8.0)
-		pad.mesh = pad_mesh
-		pad.position = Vector3(i * 2.2, 0.03, 0)
-		var paint := StandardMaterial3D.new()
-		paint.albedo_color = Color(0.85, 0.85, 0.8) if i == 0 else Color(0.55, 0.55, 0.52)
-		pad.material_override = paint
-		add_child(pad)
-	_build_hill()
-	_build_pond()
-	_build_forest()
-	var north := Label3D.new()
-	north.text = "СЕВЕР"
-	north.position = Vector3(0, 6.2, -72)
-	north.font_size = 64
-	north.modulate = Color(0.95, 0.95, 0.9)
-	north.billboard = BaseMaterial3D.BILLBOARD_ENABLED
-	add_child(north)
+	field = RangeField.new()
+	add_child(field)
+	field.build()
 
 	_build_wind_arrow()
 
@@ -362,7 +341,7 @@ func _start_flight() -> void:
 	craft.setup(library.profiles[selected])
 	var spot := _start_spot()
 	var clearance := maxf(float(craft.model.get("height", 0.1)) * 0.5, 0.04)
-	craft.position = Vector3(spot.x, _ground_height(spot) + clearance + 0.04, spot.z)
+	craft.position = Vector3(spot.x, field.sample_height(spot.x, spot.z) + clearance + 0.04, spot.z)
 	craft.target_altitude = craft.position.y
 	craft.motor_temp = air_temp
 	craft.air_temp = air_temp
@@ -513,7 +492,7 @@ func _update_wind_arrow() -> void:
 	if not wind_arrow.visible:
 		return
 	var spot := Vector3(6.5, 0.0, 4.0)
-	spot.y = _sample_height(spot.x, spot.z) + 0.12
+	spot.y = field.sample_height(spot.x, spot.z) + 0.12
 	wind_arrow.position = spot
 	wind_arrow.look_at(spot + Vector3(blow.x, 0.0, blow.z), Vector3.UP)
 
@@ -698,9 +677,10 @@ func _terrain_picker() -> OptionButton:
 	var picker := OptionButton.new()
 	picker.focus_mode = Control.FOCUS_NONE
 	picker.add_item("Старт на площадке", TERRAIN_POLYGON)
-	picker.add_item("Старт на горке", TERRAIN_SLOPE)
+	picker.add_item("Старт у гряды", TERRAIN_SLOPE)
 	picker.add_item("Старт у воды", TERRAIN_WATER)
 	picker.add_item("Старт у леса", TERRAIN_FOREST)
+	picker.add_item("Старт у дорожки", TERRAIN_COURSE)
 	picker.selected = terrain
 	picker.item_selected.connect(func(index: int) -> void:
 		terrain = index
@@ -752,74 +732,7 @@ func _temp_slider() -> HBoxContainer:
 func _apply_terrain() -> void:
 	if terrain_hint == null:
 		return
-	terrain_hint.text = "На одной карте сразу площадка, горка на севере, пруд справа и лес слева. Выбор только переносит точку старта."
-
-
-func _build_hill() -> void:
-	slope_visual = Node3D.new()
-	add_child(slope_visual)
-	_add_sign("ГОРКА", HILL_CENTER + Vector3(0.0, HILL_PEAK + 1.4, 0.0), slope_visual)
-
-
-func _build_pond() -> void:
-	var pond := MeshInstance3D.new()
-	var mesh := CylinderMesh.new()
-	mesh.top_radius = POND_RADIUS
-	mesh.bottom_radius = POND_RADIUS
-	mesh.height = 0.35
-	pond.mesh = mesh
-	pond.position = Vector3(POND_CENTER.x, -0.05, POND_CENTER.y)
-	var water := _flat_color(Color(0.16, 0.42, 0.72))
-	water.roughness = 0.18
-	pond.material_override = water
-	add_child(pond)
-	var pier := MeshInstance3D.new()
-	var pier_mesh := BoxMesh.new()
-	pier_mesh.size = Vector3(12.0, 0.18, 3.2)
-	pier.mesh = pier_mesh
-	pier.position = Vector3(24.0, 0.12, POND_CENTER.y)
-	pier.material_override = _flat_color(Color(0.45, 0.34, 0.22))
-	add_child(pier)
-	_add_sign("ВОДА", Vector3(POND_CENTER.x, 3.5, POND_CENTER.y), self)
-
-
-func _build_forest() -> void:
-	forest_root = Node3D.new()
-	add_child(forest_root)
-	var spots: Array[Vector3] = [
-		Vector3(-28, 0, 4), Vector3(-24, 0, -2), Vector3(-33, 0, 8),
-		Vector3(-22, 0, 10), Vector3(-36, 0, 0), Vector3(-30, 0, 14),
-		Vector3(-18, 0, 2), Vector3(-34, 0, -6),
-	]
-	for spot in spots:
-		var placed := Vector3(spot.x, _sample_height(spot.x, spot.z), spot.z)
-		var trunk := MeshInstance3D.new()
-		var trunk_mesh := CylinderMesh.new()
-		trunk_mesh.top_radius = 0.22
-		trunk_mesh.bottom_radius = 0.32
-		trunk_mesh.height = 3.4
-		trunk.mesh = trunk_mesh
-		trunk.position = placed + Vector3(0, 1.7, 0)
-		trunk.material_override = _flat_color(Color(0.35, 0.24, 0.14))
-		forest_root.add_child(trunk)
-		var crown := MeshInstance3D.new()
-		var crown_mesh := SphereMesh.new()
-		crown_mesh.radius = 2.1
-		crown_mesh.height = 3.6
-		crown.mesh = crown_mesh
-		crown.position = placed + Vector3(0, 4.2, 0)
-		crown.material_override = _flat_color(Color(0.15, 0.38, 0.16))
-		forest_root.add_child(crown)
-	_add_sign("ЛЕС", Vector3(FOREST_CENTER.x, 7.0, FOREST_CENTER.y), forest_root)
-
-
-func _add_sign(text: String, pos: Vector3, parent: Node) -> void:
-	var sign_label := Label3D.new()
-	sign_label.text = text
-	sign_label.position = pos
-	sign_label.font_size = 48
-	sign_label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
-	parent.add_child(sign_label)
+	terrain_hint.text = "Одно поле: площадка, гряда на севере, пруд справа, роща слева и дорожка испытаний на юге. Выбор только переносит старт."
 
 
 func _make_precip(amount: int, life: float, speed_min: float, speed_max: float, drop_size: Vector2, color: Color, gravity: Vector3) -> CPUParticles3D:
@@ -869,7 +782,7 @@ func _update_gust(delta: float) -> void:
 		var amp := 0.0
 		if turbulence_on:
 			amp += 0.3 * wind_speed + 0.25
-		if craft != null and craft.airborne and craft.position.y < 8.0 and _in_forest(craft.position):
+		if craft != null and craft.airborne and craft.position.y < 8.0 and field.in_grove(craft.position):
 			amp += 1.5
 		amp = minf(amp, 2.5)
 		var dir := Vector3(randf_range(-1.0, 1.0), 0.0, randf_range(-1.0, 1.0))
@@ -879,77 +792,16 @@ func _update_gust(delta: float) -> void:
 	gust = gust.move_toward(gust_target, 3.5 * delta)
 
 
-func _ground_height(pos: Vector3) -> float:
-	return _sample_height(pos.x, pos.z)
-
-
-func _sample_height(x: float, z: float) -> float:
-	var h := _wave_height(x, z) + _hill_only(x, z) + _pond_dent(x, z)
-	var pad_d := Vector2(x, z).length()
-	if pad_d < 9.0:
-		h = lerpf(0.0, h, smoothstep(4.0, 9.0, pad_d))
-	if x >= 18.0 and x <= 30.0 and absf(z - POND_CENTER.y) <= 1.6:
-		h = 0.05
-	return h
-
-
-func _wave_height(x: float, z: float) -> float:
-	return 0.45 * sin(x * 0.085) * cos(z * 0.07) + 0.22 * sin(x * 0.19 + z * 0.13)
-
-
-func _hill_only(x: float, z: float) -> float:
-	var dist := Vector2(x - HILL_CENTER.x, z - HILL_CENTER.z).length()
-	if dist >= HILL_RADIUS:
-		return 0.0
-	var t := 1.0 - dist / HILL_RADIUS
-	return HILL_PEAK * t * t
-
-
-func _pond_dent(x: float, z: float) -> float:
-	var dist := Vector2(x, z).distance_to(POND_CENTER)
-	var edge := POND_RADIUS + 6.0
-	if dist >= edge:
-		return 0.0
-	var u := 1.0 - dist / edge
-	return -1.2 * u * u
-
-
-func _surface_kind(pos: Vector3) -> int:
-	if _on_pier(pos):
-		return 0
-	if Vector2(pos.x, pos.z).distance_to(POND_CENTER) <= POND_RADIUS:
-		return 1
-	return 0
-
-
-func _slope_accel(pos: Vector3) -> Vector3:
-	if _hill_only(pos.x, pos.z) < 0.35:
-		return Vector3.ZERO
-	var away := Vector3(pos.x - HILL_CENTER.x, 0.0, pos.z - HILL_CENTER.z)
-	if away.length() < 1.2:
-		return Vector3.ZERO
-	var dist := away.length()
-	var t := 1.0 - dist / HILL_RADIUS
-	var grade := 2.0 * HILL_PEAK / HILL_RADIUS * t
-	return away.normalized() * FlightModel.G * grade * 0.7
-
-
-func _on_pier(pos: Vector3) -> bool:
-	return pos.x >= 18.0 and pos.x <= 30.0 and absf(pos.z - POND_CENTER.y) <= 1.6
-
-
-func _in_forest(pos: Vector3) -> bool:
-	return Vector2(pos.x, pos.z).distance_to(FOREST_CENTER) <= FOREST_RADIUS
-
-
 func _start_spot() -> Vector3:
 	match terrain:
 		TERRAIN_SLOPE:
-			return Vector3(0.0, 0.0, -24.0)
+			return Vector3(0.0, 0.0, -64.0)
 		TERRAIN_WATER:
-			return Vector3(22.0, 0.0, POND_CENTER.y)
+			return Vector3(58.0, 0.0, 14.0)
 		TERRAIN_FOREST:
-			return Vector3(-16.0, 0.0, 4.0)
+			return Vector3(-52.0, 0.0, 8.0)
+		TERRAIN_COURSE:
+			return Vector3(0.0, 0.0, 48.0)
 		_:
 			return Vector3.ZERO
 
@@ -957,13 +809,15 @@ func _start_spot() -> Vector3:
 func _terrain_name() -> String:
 	match terrain:
 		TERRAIN_SLOPE:
-			return "склон на север"
+			return "гряда на север"
 		TERRAIN_WATER:
-			return "вода с причалом"
+			return "пруд с причалом"
 		TERRAIN_FOREST:
-			return "лес"
+			return "роща"
+		TERRAIN_COURSE:
+			return "дорожка испытаний"
 		_:
-			return "ровный полигон"
+			return "площадка"
 
 
 func _precip_name() -> String:
@@ -1015,46 +869,6 @@ func _set_slot(key: String, text: String) -> void:
 	var label := hud_slots.get(key) as Label
 	if label != null:
 		label.text = text
-
-
-func _build_height_mesh() -> ArrayMesh:
-	var tool := SurfaceTool.new()
-	tool.begin(Mesh.PRIMITIVE_TRIANGLES)
-	var cells := 72
-	var span := 180.0
-	var step := span / float(cells)
-	var origin := -span * 0.5
-	for iz in cells:
-		for ix in cells:
-			var x0 := origin + float(ix) * step
-			var z0 := origin + float(iz) * step
-			var x1 := x0 + step
-			var z1 := z0 + step
-			_add_ground_vertex(tool, x0, z0)
-			_add_ground_vertex(tool, x1, z0)
-			_add_ground_vertex(tool, x1, z1)
-			_add_ground_vertex(tool, x0, z0)
-			_add_ground_vertex(tool, x1, z1)
-			_add_ground_vertex(tool, x0, z1)
-	tool.generate_normals()
-	return tool.commit()
-
-
-func _add_ground_vertex(tool: SurfaceTool, x: float, z: float) -> void:
-	var h := _sample_height(x, z)
-	tool.set_color(_ground_tint(h, x, z))
-	tool.add_vertex(Vector3(x, h, z))
-
-
-func _ground_tint(h: float, x: float, z: float) -> Color:
-	var grass := Color(0.30, 0.46, 0.24)
-	var sand := Color(0.64, 0.58, 0.38)
-	var rock := Color(0.46, 0.47, 0.42)
-	var shore := clampf((Vector2(x, z).distance_to(POND_CENTER) - POND_RADIUS) / 6.0, 0.0, 1.0)
-	var tint := sand.lerp(grass, shore)
-	if h > 2.2:
-		tint = tint.lerp(rock, clampf((h - 2.2) / 2.4, 0.0, 1.0))
-	return tint * (0.94 + 0.06 * sin(x * 0.55 + z * 0.8))
 
 
 func _wind_slider() -> HBoxContainer:

@@ -53,11 +53,13 @@ var temp_label: Label
 var wind_labels: Array[Label] = []
 var wind_sliders: Array[HSlider] = []
 var wind_pickers: Array[OptionButton] = []
-var camera_cone: MeshInstance3D
 var status_label: Label
 var orbit_yaw := 0.6
 var orbit_pitch := -0.45
 var orbit_distance := 8.0
+var mouse_stick := false
+var mouse_pitch := 0.0
+var mouse_roll := 0.0
 var gust := Vector3.ZERO
 var gust_target := Vector3.ZERO
 var gust_timer := 0.0
@@ -125,13 +127,21 @@ func _process(_delta: float) -> void:
 		if status_flash_time <= 0.0:
 			status_flash = ""
 	_place_precip()
-	_place_camera_cone()
 
 
 func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventMouseMotion and Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT):
 		orbit_yaw -= event.relative.x * 0.005
 		orbit_pitch = clampf(orbit_pitch - event.relative.y * 0.004, -1.2, -0.05)
+	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT:
+		mouse_stick = event.pressed and flying
+		if not mouse_stick:
+			mouse_pitch = 0.0
+			mouse_roll = 0.0
+	if event is InputEventMouseMotion and mouse_stick and not Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT):
+		# Вверх — как W, вправо — как D. Отпускание возвращает наклон к центру.
+		mouse_roll = clampf(mouse_roll + event.relative.x * 0.0035, -1.0, 1.0)
+		mouse_pitch = clampf(mouse_pitch - event.relative.y * 0.0035, -1.0, 1.0)
 	if event is InputEventMouseButton and event.pressed:
 		if event.button_index == MOUSE_BUTTON_WHEEL_UP:
 			orbit_distance = maxf(orbit_distance - 0.6, 1.5)
@@ -203,7 +213,6 @@ func _build_world() -> void:
 	camera = Camera3D.new()
 	camera.current = true
 	add_child(camera)
-	_build_camera_cone()
 
 
 func _build_ui() -> void:
@@ -260,7 +269,7 @@ func _build_ui() -> void:
 	start.focus_mode = Control.FOCUS_NONE
 	start.pressed.connect(_start_flight)
 	outer.add_child(start)
-	status_label = _hint("Shift поднимает, Ctrl снижает. Стрелка влево и вправо поворачивают, как Q и E.")
+	status_label = _hint("Shift поднимает, Ctrl снижает. Левая кнопка мыши наклоняет аппарат. Правая крутит камеру.")
 	outer.add_child(status_label)
 	_apply_terrain()
 
@@ -380,6 +389,9 @@ func _back_to_menu() -> void:
 	menu_panel.visible = true
 	flight_panel.visible = false
 	warning_label.text = ""
+	mouse_stick = false
+	mouse_pitch = 0.0
+	mouse_roll = 0.0
 	for key in hud_slots:
 		(hud_slots[key] as Label).text = ""
 	status_flash = ""
@@ -424,6 +436,9 @@ func _read_flight_input(delta: float) -> void:
 			climb = 1.6 * trigger_up
 		elif trigger_down > 0.1:
 			climb = -1.4 * trigger_down
+	if mouse_stick:
+		pitch_goal = mouse_pitch
+		roll_goal = mouse_roll
 	# Короткое нажатие даёт маленький наклон. Полный наклон только если удерживать клавишу.
 	var stick_step := 2.4 * delta
 	craft.stick_pitch = move_toward(craft.stick_pitch, clampf(pitch_goal, -1.0, 1.0), stick_step)
@@ -531,52 +546,6 @@ func _wind_vector() -> Vector3:
 func _wind_from_name() -> String:
 	var names := ["С", "СВ", "В", "ЮВ", "Ю", "ЮЗ", "З", "СЗ"]
 	return names[clampi(wind_from, 0, names.size() - 1)]
-
-
-func _build_camera_cone() -> void:
-	camera_cone = MeshInstance3D.new()
-	var mesh := CylinderMesh.new()
-	mesh.top_radius = 1.0
-	mesh.bottom_radius = 0.04
-	mesh.height = 9.0
-	camera_cone.mesh = mesh
-	var paint := StandardMaterial3D.new()
-	paint.albedo_color = Color(0.35, 0.9, 0.5, 0.22)
-	paint.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	paint.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	paint.cull_mode = BaseMaterial3D.CULL_DISABLED
-	camera_cone.material_override = paint
-	camera_cone.visible = false
-	add_child(camera_cone)
-
-
-func _place_camera_cone() -> void:
-	if camera_cone == null:
-		return
-	var fov := 0.0
-	if craft != null:
-		fov = FlightModel.read_number(craft.profile.get("camera_fov_deg"), 0.0)
-	# Из кабины конус закрыл бы весь обзор: камера стоит в его узком конце.
-	var show := flying and craft != null and fov > 1.0 and camera_mode != 1
-	camera_cone.visible = show
-	if not show:
-		return
-	var length := 9.0
-	var radius := length * tan(deg_to_rad(fov) * 0.5)
-	var mesh := camera_cone.mesh as CylinderMesh
-	if mesh != null:
-		mesh.height = length
-		mesh.top_radius = radius
-		mesh.bottom_radius = 0.04
-	var forward := craft.forward()
-	var origin := craft.global_position + craft.global_transform.basis.y * 0.12
-	var side := forward.cross(Vector3.UP)
-	if side.length() < 0.05:
-		side = Vector3.RIGHT
-	side = side.normalized()
-	var up := side.cross(forward).normalized()
-	# Цилиндр вытянут по своей Y. Широкий конец смотрит вперёд, узкий — у камеры.
-	camera_cone.global_transform = Transform3D(Basis(side, forward, up), origin + forward * length * 0.5)
 
 
 func _log(line: String) -> void:

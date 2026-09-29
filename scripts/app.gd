@@ -5,6 +5,7 @@ const Quadrotor = preload("res://scripts/quadrotor.gd")
 const FlightModel = preload("res://scripts/flight_model.gd")
 const RangeField = preload("res://scripts/range_field.gd")
 const FlightOverlay = preload("res://scripts/flight_overlay.gd")
+const CanopyDrag = preload("res://scripts/canopy_drag.gd")
 
 const TERRAIN_POLYGON := 0
 const TERRAIN_SLOPE := 1
@@ -30,8 +31,14 @@ var camera: Camera3D
 var overlay
 var show_sensors := false
 var show_aero := false
+var show_wind := false
+var show_thrust := false
+var show_drag := false
 var sensor_button: Button
 var aero_button: Button
+var wind_button: Button
+var thrust_button: Button
+var drag_button: Button
 var rain: GPUParticles3D
 var snow: GPUParticles3D
 var hail: GPUParticles3D
@@ -88,14 +95,15 @@ func _physics_process(delta: float) -> void:
 		return
 	_read_flight_input(delta)
 	_update_gust(delta)
-	craft.wind = _wind_vector() + gust
+	CanopyDrag.apply(craft, field.crowns, delta)
+	craft.wind = _wind_vector() + gust + craft.canopy_gust
 	craft.air_density = FlightModel.air_density(air_temp)
 	craft.air_temp = air_temp
 	craft.precip = precip
 	craft.surface_y = field.sample_height(craft.position.x, craft.position.z)
 	craft.surface_kind = field.surface_kind(craft.position)
 	craft.slope_accel = field.slope_accel(craft.position)
-	craft.canopy = field.canopy_at(craft.position)
+	craft.water_surface = RangeField.WATER_Y
 	var was_airborne := craft.airborne
 	var had_motors := craft.motors_on
 	craft.step(delta)
@@ -144,6 +152,9 @@ func _process(_delta: float) -> void:
 		# Из кабины конус не рисуем: он начинается в объективе и зальёт весь кадр.
 		overlay.set("sensors_on", show_sensors and camera_mode != 1)
 		overlay.set("aero_on", show_aero)
+		overlay.set("wind_on", show_wind)
+		overlay.set("thrust_on", show_thrust)
+		overlay.set("drag_on", show_drag)
 	if status_flash_time > 0.0:
 		status_flash_time -= _delta
 		if status_flash_time <= 0.0:
@@ -175,7 +186,7 @@ func _unhandled_input(event: InputEvent) -> void:
 		elif event.keycode == KEY_V:
 			_toggle_sensors()
 		elif event.keycode == KEY_B:
-			_toggle_aero()
+			_toggle_forces()
 		elif event.keycode == KEY_ESCAPE and flying:
 			_back_to_menu()
 
@@ -295,11 +306,11 @@ func _build_ui() -> void:
 	start.focus_mode = Control.FOCUS_NONE
 	start.pressed.connect(_start_flight)
 	outer.add_child(start)
-	status_label = _hint("Shift поднимает, Ctrl снижает. V — конус камеры, B — стрелки скорости и ветра. Оба выключены, пока не нажмёте: так они не закрывают аппарат.")
+	status_label = _hint("Shift поднимает, Ctrl снижает. V — конус камеры. B включает сразу скорость, ветер, тягу и сопротивление. Кнопки в полёте включают их по одной. Все выключены, пока не нажмёте.")
 	outer.add_child(status_label)
 	_apply_terrain()
 
-	flight_panel = _panel(Vector2(8, 8), Vector2(1264, 96))
+	flight_panel = _panel(Vector2(8, 8), Vector2(1264, 124))
 	flight_panel.visible = false
 	var tight := flight_panel.get_theme_stylebox("panel") as StyleBoxFlat
 	if tight != null:
@@ -346,12 +357,24 @@ func _build_ui() -> void:
 	sensor_button = _toggle_button("Камера", "Конус камеры. Клавиша V")
 	sensor_button.pressed.connect(_toggle_sensors)
 	telemetry_row.add_child(sensor_button)
-	aero_button = _toggle_button("Векторы", "Скорость и ветер от центра аппарата. Клавиша B")
+	aero_button = _toggle_button("Скорость", "Жёлтая стрелка скорости. Клавиша B включает все стрелки сразу")
 	aero_button.pressed.connect(_toggle_aero)
 	telemetry_row.add_child(aero_button)
+	var force_row := HBoxContainer.new()
+	force_row.add_theme_constant_override("separation", 6)
+	flight_box.add_child(force_row)
+	wind_button = _toggle_button("Ветер", "Синяя стрелка ветра")
+	wind_button.pressed.connect(_toggle_wind)
+	force_row.add_child(wind_button)
+	thrust_button = _toggle_button("Тяга", "Зелёная стрелка тяги моторов")
+	thrust_button.pressed.connect(_toggle_thrust)
+	force_row.add_child(thrust_button)
+	drag_button = _toggle_button("Сопр.", "Красная стрелка сопротивления")
+	drag_button.pressed.connect(_toggle_drag)
+	force_row.add_child(drag_button)
 	_paint_toggles()
 	warning_label = Label.new()
-	warning_label.position = Vector2(16, 108)
+	warning_label.position = Vector2(16, 136)
 	warning_label.size = Vector2(1100, 24)
 	warning_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	warning_label.add_theme_color_override("font_color", Color(1.0, 0.86, 0.4))
@@ -785,7 +808,7 @@ func _temp_slider() -> HBoxContainer:
 func _apply_terrain() -> void:
 	if terrain_hint == null:
 		return
-	terrain_hint.text = "Одно поле: площадка, гряда на севере, пруд справа, роща слева и дорожка испытаний на юге. Выбор только переносит старт."
+	terrain_hint.text = "Одно поле: площадка, густой лес на западе, пруд и промзона на востоке, каньон на севере, дорожка и FPV-трасса. Выбор только переносит старт."
 
 
 func _make_precip(amount: int, life: float, speed_min: float, speed_max: float, drop_size: Vector2, color: Color, gravity: Vector3) -> GPUParticles3D:
@@ -1009,11 +1032,41 @@ func _toggle_aero() -> void:
 	_paint_toggles()
 
 
+func _toggle_wind() -> void:
+	show_wind = not show_wind
+	_paint_toggles()
+
+
+func _toggle_thrust() -> void:
+	show_thrust = not show_thrust
+	_paint_toggles()
+
+
+func _toggle_drag() -> void:
+	show_drag = not show_drag
+	_paint_toggles()
+
+
+func _toggle_forces() -> void:
+	var enable := not (show_aero and show_wind and show_thrust and show_drag)
+	show_aero = enable
+	show_wind = enable
+	show_thrust = enable
+	show_drag = enable
+	_paint_toggles()
+
+
 func _paint_toggles() -> void:
 	if sensor_button != null:
 		sensor_button.modulate = Color(0.65, 1.0, 0.72) if show_sensors else Color(0.72, 0.74, 0.76)
 	if aero_button != null:
-		aero_button.modulate = Color(0.7, 0.86, 1.0) if show_aero else Color(0.72, 0.74, 0.76)
+		aero_button.modulate = Color(0.95, 0.84, 0.45) if show_aero else Color(0.72, 0.74, 0.76)
+	if wind_button != null:
+		wind_button.modulate = Color(0.55, 0.78, 1.0) if show_wind else Color(0.72, 0.74, 0.76)
+	if thrust_button != null:
+		thrust_button.modulate = Color(0.55, 0.9, 0.55) if show_thrust else Color(0.72, 0.74, 0.76)
+	if drag_button != null:
+		drag_button.modulate = Color(1.0, 0.55, 0.5) if show_drag else Color(0.72, 0.74, 0.76)
 
 
 func _heading_name(forward: Vector3) -> String:

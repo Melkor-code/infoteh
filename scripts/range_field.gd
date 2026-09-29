@@ -20,13 +20,16 @@ const COURSE_X0 := -26.0
 const COURSE_X1 := 40.0
 const COURSE_Z0 := 46.0
 const COURSE_Z1 := 300.0
+const WATER_Y := -2.0
 
 var crowns: Array[Dictionary] = []
 var solids: Array[Dictionary] = []
 var relief_noise := FastNoiseLite.new()
 var valley_noise := FastNoiseLite.new()
+var forest_noise := FastNoiseLite.new()
 var _mesh_cache: Dictionary = {}
 var _card_shader_res: Shader
+var _fpv_cache := PackedVector3Array()
 
 
 func build() -> void:
@@ -39,6 +42,9 @@ func build() -> void:
 	valley_noise.noise_type = FastNoiseLite.TYPE_SIMPLEX_SMOOTH
 	valley_noise.frequency = 0.009
 	valley_noise.seed = 88
+	forest_noise.noise_type = FastNoiseLite.TYPE_SIMPLEX_SMOOTH
+	forest_noise.frequency = 0.045
+	forest_noise.seed = 19
 	_build_ground()
 	_build_water()
 	_build_pier()
@@ -48,15 +54,21 @@ func build() -> void:
 	_build_road()
 	_build_yard()
 	_build_grass()
+	_build_zones()
 	_add_sign("СЕВЕР", Vector3(0.0, 14.0, -230.0))
 	_add_sign("ГРЯДА", Vector3(8.0, 12.0, -150.0))
 	_add_sign("ПРУД", Vector3(96.0, 4.0, 22.0))
 	_add_sign("РОЩА", Vector3(-90.0, 8.0, 16.0))
 	_add_sign("ДОРОЖКА", Vector3(0.0, 5.5, 52.0))
+	_add_sign("ЛЕС", Vector3(-102.0, 14.0, 24.0))
+	_add_sign("ПРОМЗОНА", Vector3(168.0, 16.0, 6.0))
+	_add_sign("КАНЬОН", Vector3(18.0, 18.0, -150.0))
+	_add_sign("ТРАССА", Vector3(-96.0, 12.0, 148.0))
 
 
 func sample_height(x: float, z: float) -> float:
-	var h := _waves(x, z) + _relief(x, z) + _mounds(x, z) + _pond_dent(x, z)
+	var h := _waves(x, z) + _relief(x, z) + _mounds(x, z)
+	h = _carve_basin(x, z, h)
 	var pad := Vector2(x, z).length()
 	if pad < PAD_BLEND:
 		h = lerpf(0.0, h, smoothstep(PAD_FLAT, PAD_BLEND, pad))
@@ -65,13 +77,16 @@ func sample_height(x: float, z: float) -> float:
 	if _on_course(x, z):
 		var edge := _course_blend(x, z)
 		h = lerpf(h, 0.16, edge)
+	var corridor := _fpv_distance(x, z)
+	if corridor < 16.0:
+		h = lerpf(0.22, h, smoothstep(6.0, 16.0, corridor))
 	return h
 
 
 func surface_kind(pos: Vector3) -> int:
 	if _on_pier(pos.x, pos.z):
 		return 0
-	if _pond_field(pos.x, pos.z) > 0.22:
+	if _water_covers(pos.x, pos.z):
 		return 1
 	return 0
 
@@ -167,6 +182,9 @@ func _ground_vertex(tool: SurfaceTool, x: float, z: float) -> void:
 
 
 func _tint(h: float, x: float, z: float) -> Color:
+	if h < WATER_Y + 0.08:
+		var depth := clampf((WATER_Y - h) / 4.2, 0.0, 1.0)
+		return Color(0.68, 0.58, 0.36).lerp(Color(0.36, 0.34, 0.3), depth)
 	# Низина темнее, пригорок светлее. Камень и снег сверху это не отменяют.
 	var lift := clampf((h + 0.6) / 5.5, 0.0, 1.0)
 	var grass := Color(0.13, 0.29, 0.1).lerp(Color(0.48, 0.68, 0.3), lift)
@@ -290,11 +308,67 @@ func _pond_field(x: float, z: float) -> float:
 	return field
 
 
-func _pond_dent(x: float, z: float) -> float:
-	var field := _pond_field(x, z)
-	if field <= 0.0:
+func _carve_basin(x: float, z: float, h: float) -> float:
+	var wet := maxf(_pond_field(x, z), _canyon_field(x, z))
+	if wet <= 0.001:
+		return h
+	# Внутри чаши дно ниже зеркала воды. Иначе плоскость воды висит над землёй.
+	var bed := WATER_Y - 0.45 - wet * 4.2
+	return lerpf(h, bed, smoothstep(0.04, 0.22, wet))
+
+
+func _canyon_field(x: float, z: float) -> float:
+	if z > -98.0 or z < -206.0:
 		return 0.0
-	return -1.35 * field * field
+	var along := clampf((-z - 102.0) / 96.0, 0.0, 1.0)
+	var center_x := lerpf(6.0, 26.0, along)
+	var dist := absf(x - center_x)
+	var half := 12.0
+	if dist >= half:
+		return 0.0
+	return 1.0 - dist / half
+
+
+func _canyon_center_x(z: float) -> float:
+	var along := clampf((-z - 102.0) / 96.0, 0.0, 1.0)
+	return lerpf(6.0, 26.0, along)
+
+
+func _water_covers(x: float, z: float) -> bool:
+	if _on_pier(x, z):
+		return false
+	var wet := maxf(_pond_field(x, z), _canyon_field(x, z))
+	return wet > 0.16 and sample_height(x, z) < WATER_Y + 0.05
+
+
+func _fpv_points() -> PackedVector3Array:
+	if not _fpv_cache.is_empty():
+		return _fpv_cache
+	_fpv_cache.append(Vector3(-46.0, 0.0, 100.0))
+	_fpv_cache.append(Vector3(-78.0, 0.0, 132.0))
+	_fpv_cache.append(Vector3(-118.0, 0.0, 154.0))
+	_fpv_cache.append(Vector3(-156.0, 0.0, 196.0))
+	_fpv_cache.append(Vector3(-128.0, 0.0, 232.0))
+	_fpv_cache.append(Vector3(-82.0, 0.0, 258.0))
+	return _fpv_cache
+
+
+func _fpv_distance(x: float, z: float) -> float:
+	var points := _fpv_points()
+	var best := 9999.0
+	for i in points.size() - 1:
+		best = minf(best, _segment_distance(x, z, points[i], points[i + 1]))
+	return best
+
+
+func _segment_distance(x: float, z: float, a: Vector3, b: Vector3) -> float:
+	var ab := Vector2(b.x - a.x, b.z - a.z)
+	var len2 := ab.length_squared()
+	if len2 < 0.01:
+		return Vector2(x - a.x, z - a.z).length()
+	var t := clampf(Vector2(x - a.x, z - a.z).dot(ab) / len2, 0.0, 1.0)
+	var point := Vector2(a.x, a.z) + ab * t
+	return Vector2(x, z).distance_to(point)
 
 
 func _on_pier(x: float, z: float) -> bool:
@@ -314,16 +388,29 @@ func _course_blend(x: float, z: float) -> float:
 func _build_water() -> void:
 	var tool := SurfaceTool.new()
 	tool.begin(Mesh.PRIMITIVE_TRIANGLES)
-	var step := 3.0
-	for iz in 28:
-		for ix in 28:
-			var x0 := 52.0 + float(ix) * step
-			var z0 := -12.0 + float(iz) * step
+	_water_patch(tool, 48.0, -18.0, 136.0, 64.0, 3.0)
+	_water_patch(tool, -10.0, -208.0, 44.0, -96.0, 3.0)
+	var mesh := tool.commit()
+	if mesh.get_surface_count() == 0:
+		return
+	var water := MeshInstance3D.new()
+	water.mesh = mesh
+	water.material_override = _water_material()
+	water.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	add_child(water)
+	_scatter_bed_rocks()
+
+
+func _water_patch(tool: SurfaceTool, x_min: float, z_min: float, x_max: float, z_max: float, step: float) -> void:
+	var ix_max := int((x_max - x_min) / step)
+	var iz_max := int((z_max - z_min) / step)
+	for iz in iz_max:
+		for ix in ix_max:
+			var x0 := x_min + float(ix) * step
+			var z0 := z_min + float(iz) * step
 			var x1 := x0 + step
 			var z1 := z0 + step
-			if _pond_field(x0, z0) < 0.18 and _pond_field(x1, z1) < 0.18:
-				continue
-			if _pond_field((x0 + x1) * 0.5, (z0 + z1) * 0.5) < 0.16:
+			if sample_height((x0 + x1) * 0.5, (z0 + z1) * 0.5) >= WATER_Y - 0.05:
 				continue
 			_water_vertex(tool, x0, z0)
 			_water_vertex(tool, x1, z0)
@@ -331,17 +418,43 @@ func _build_water() -> void:
 			_water_vertex(tool, x0, z0)
 			_water_vertex(tool, x1, z1)
 			_water_vertex(tool, x0, z1)
-	var water := MeshInstance3D.new()
-	water.mesh = tool.commit()
-	water.material_override = _water_material()
-	add_child(water)
 
 
 func _water_vertex(tool: SurfaceTool, x: float, z: float) -> void:
-	var field := _pond_field(x, z)
-	var shade := 0.75 + 0.25 * field
-	tool.set_color(Color(shade, shade, 1.0))
-	tool.add_vertex(Vector3(x, 0.05, z))
+	var bed := sample_height(x, z)
+	var depth := clampf((WATER_Y - bed) / 4.4, 0.0, 1.0)
+	tool.set_color(Color(depth, depth, 1.0))
+	tool.add_vertex(Vector3(x, WATER_Y, z))
+
+
+func _scatter_bed_rocks() -> void:
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 31
+	var spots: Array[Transform3D] = []
+	var guard := 0
+	while spots.size() < 48 and guard < 240:
+		guard += 1
+		var x := rng.randf_range(58.0, 120.0)
+		var z := rng.randf_range(-8.0, 48.0)
+		if not _water_covers(x, z):
+			continue
+		var y := sample_height(x, z)
+		var basis := Basis(Vector3.UP, rng.randf() * TAU).scaled(Vector3.ONE * rng.randf_range(0.45, 1.1))
+		spots.append(Transform3D(basis, Vector3(x, y + 0.08, z)))
+	if spots.is_empty():
+		return
+	var multi := MultiMesh.new()
+	multi.transform_format = MultiMesh.TRANSFORM_3D
+	multi.mesh = _pebble_mesh()
+	multi.instance_count = spots.size()
+	for i in spots.size():
+		multi.set_instance_transform(i, spots[i])
+	var node := MultiMeshInstance3D.new()
+	node.multimesh = multi
+	node.material_override = _foliage_material()
+	node.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	node.visibility_range_end = 90.0
+	add_child(node)
 
 
 func _build_pier() -> void:
@@ -352,6 +465,19 @@ func _build_pier() -> void:
 	pier.position = Vector3((PIER_X0 + PIER_X1) * 0.5, 0.22, PIER_Z)
 	pier.material_override = _paint(Color(0.42, 0.3, 0.18))
 	add_child(pier)
+	var bed := sample_height(72.0, PIER_Z)
+	if bed < WATER_Y:
+		for dz in [-1.1, 1.1]:
+			var post := MeshInstance3D.new()
+			var cyl := CylinderMesh.new()
+			var height := 0.22 - bed
+			cyl.top_radius = 0.12
+			cyl.bottom_radius = 0.16
+			cyl.height = height
+			post.mesh = cyl
+			post.position = Vector3(67.2, bed + height * 0.5, PIER_Z + dz)
+			post.material_override = _paint(Color(0.35, 0.26, 0.16))
+			add_child(post)
 
 
 func _build_pad_marks() -> void:
@@ -398,6 +524,7 @@ func _scatter_nature() -> void:
 			var size := rng.randf_range(0.72, 1.22)
 			_remember_tree(spots, x, z, kind, size, rng.randf() * TAU, rng.randi_range(0, 1))
 		_flush_cluster(spots)
+	_build_dense_forest()
 	_scatter_floor(rng)
 
 
@@ -449,15 +576,15 @@ func _cluster_kind(cluster: Vector3, rng: RandomNumberGenerator) -> int:
 func _tree_spec(kind: int) -> Dictionary:
 	match kind:
 		0:
-			return {"trunk_r": 0.2, "trunk_h": 2.2, "reach": 1.7, "base": 1.3, "top": 7.0}
+			return {"trunk_r": 0.2, "trunk_h": 2.2, "reach": 3.1, "base": 1.2, "top": 7.2}
 		1:
-			return {"trunk_r": 0.22, "trunk_h": 3.2, "reach": 2.0, "base": 2.3, "top": 7.4}
+			return {"trunk_r": 0.22, "trunk_h": 3.2, "reach": 3.3, "base": 2.0, "top": 7.6}
 		2:
-			return {"trunk_r": 0.34, "trunk_h": 2.5, "reach": 2.6, "base": 1.8, "top": 5.8}
+			return {"trunk_r": 0.34, "trunk_h": 2.5, "reach": 3.4, "base": 1.6, "top": 6.0}
 		3:
-			return {"trunk_r": 0.14, "trunk_h": 4.4, "reach": 1.4, "base": 3.2, "top": 6.4}
+			return {"trunk_r": 0.14, "trunk_h": 4.4, "reach": 2.6, "base": 2.8, "top": 6.6}
 		_:
-			return {"trunk_r": 0.45, "trunk_h": 1.05, "reach": 0.85, "base": 0.25, "top": 1.3}
+			return {"trunk_r": 0.45, "trunk_h": 1.05, "reach": 1.35, "base": 0.2, "top": 1.4}
 
 
 func _remember_tree(spots: Array[Dictionary], x: float, z: float, kind: int, size: float, yaw: float, variant: int) -> void:
@@ -766,7 +893,6 @@ func _scatter_floor(rng: RandomNumberGenerator) -> void:
 		rocks += 1
 	_scatter_pebbles(rng)
 	_scatter_fallen(rng)
-	_scatter_tall_grass(rng)
 
 
 func _scatter_pebbles(rng: RandomNumberGenerator) -> void:
@@ -1166,39 +1292,424 @@ func _add_pylon(x: float, z: float) -> void:
 	_add_solid(x, z, 1.5, 9.0, "Столкновение с опорой ЛЭП. Облетите вышку.")
 
 
+func _build_dense_forest() -> void:
+	# Густая зона на западе. Шум оставляет поляны внутри кучи, не ровную решётку.
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 29
+	var clumps: Array[Vector3] = [
+		Vector3(-98.0, 16.0, 20.0),
+		Vector3(-132.0, 38.0, 16.0),
+		Vector3(-74.0, 46.0, 15.0),
+	]
+	var placed: Array[Vector2] = []
+	for clump in clumps:
+		var spots: Array[Dictionary] = []
+		var tries := 0
+		while spots.size() < 34 and tries < 220:
+			tries += 1
+			var ang := rng.randf() * TAU
+			var dist := clump.z * sqrt(rng.randf())
+			var x := clump.x + cos(ang) * dist
+			var z := clump.y + sin(ang) * dist
+			if forest_noise.get_noise_2d(x, z) < -0.16:
+				continue
+			if not _tree_spot_ok(x, z, placed, 2.7):
+				continue
+			placed.append(Vector2(x, z))
+			var kind := _cluster_kind(clump, rng)
+			var size := rng.randf_range(0.85, 1.3)
+			_remember_tree(spots, x, z, kind, size, rng.randf() * TAU, rng.randi_range(0, 1))
+		_flush_cluster(spots)
+
+
+func _build_zones() -> void:
+	_build_canyon_gates()
+	_build_industrial()
+	_build_fpv_track()
+
+
+func _build_canyon_gates() -> void:
+	for z in [-128.0, -156.0, -184.0]:
+		_add_canyon_gate(_canyon_center_x(z), z)
+
+
+func _add_canyon_gate(x: float, z: float) -> void:
+	var bed := sample_height(x, z)
+	var hole := 2.25
+	var center_y := WATER_Y + 4.7
+	var center := Vector3(x, center_y, z)
+	var ring := MeshInstance3D.new()
+	ring.mesh = _ring_mesh(hole + 0.32, 0.32)
+	ring.position = center
+	var paint := _metal(Color(0.7, 0.72, 0.66))
+	paint.cull_mode = BaseMaterial3D.CULL_DISABLED
+	ring.material_override = paint
+	_far(ring, 220.0)
+	add_child(ring)
+	solids.append({
+		"kind": "ring",
+		"center": center,
+		"axis": Vector3(0.0, 0.0, 1.0),
+		"major": hole + 0.32,
+		"tube": 0.32,
+		"note": "Столкновение с воротами каньона. Проходите в отверстие над водой.",
+	})
+	var top := center_y + hole + 0.35
+	var metal := _metal(Color(0.58, 0.6, 0.56))
+	for side in [-1.0, 1.0]:
+		var post := MeshInstance3D.new()
+		var box := BoxMesh.new()
+		var height := maxf(top - bed, 1.0)
+		box.size = Vector3(0.28, height, 0.28)
+		post.mesh = box
+		post.position = Vector3(x + side * (hole + 0.7), bed + height * 0.5, z)
+		post.material_override = metal
+		_far(post, 220.0)
+		add_child(post)
+		_add_solid(x + side * (hole + 0.7), z, 0.28, height, "Столкновение со стойкой ворот каньона.")
+	var header := MeshInstance3D.new()
+	var bar := BoxMesh.new()
+	bar.size = Vector3((hole + 0.7) * 2.0 + 0.4, 0.26, 0.26)
+	header.mesh = bar
+	header.position = Vector3(x, top, z)
+	header.material_override = metal
+	_far(header, 220.0)
+	add_child(header)
+
+
+func _build_industrial() -> void:
+	var ground := sample_height(164.0, 4.0)
+	_add_csg_box(Vector3(158.0, ground + 3.1, -2.0), Vector3(16.0, 6.2, 11.0), Color(0.45, 0.42, 0.38), Vector3(8.0, 3.1, 5.5), "Столкновение со зданием промзоны. Это стена, не декорация.")
+	_add_csg_box(Vector3(182.0, ground + 2.4, 16.0), Vector3(10.0, 4.8, 8.0), Color(0.4, 0.38, 0.36), Vector3(5.0, 2.4, 4.0), "Столкновение со складом промзоны.")
+	_add_csg_tank(Vector3(172.0, ground + 2.2, -16.0), 1.6, 4.4)
+	_add_csg_tank(Vector3(186.0, ground + 1.7, -8.0), 1.2, 3.4)
+	_add_csg_tank(Vector3(148.0, ground + 1.9, 18.0), 1.35, 3.8)
+	_build_fence(Vector3(146.0, ground, -22.0), 22, 16)
+	_add_yard_pipes(ground)
+
+
+func _add_csg_box(pos: Vector3, size: Vector3, color: Color, half: Vector3, note: String) -> void:
+	var box := CSGBox3D.new()
+	box.size = size
+	box.position = pos
+	box.use_collision = false
+	box.material = _paint(color)
+	_far(box, 230.0)
+	add_child(box)
+	solids.append({
+		"kind": "box",
+		"center": pos,
+		"half": half,
+		"yaw": 0.0,
+		"note": note,
+	})
+
+
+func _add_csg_tank(pos: Vector3, radius: float, height: float) -> void:
+	var tank := CSGCylinder3D.new()
+	tank.radius = radius
+	tank.height = height
+	tank.sides = 12
+	tank.position = pos
+	tank.use_collision = false
+	tank.material = _metal(Color(0.55, 0.5, 0.42))
+	_far(tank, 230.0)
+	add_child(tank)
+	_add_solid(pos.x, pos.z, radius, height, "Столкновение с цистерной. Облетите или перелетите.")
+
+
+func _build_fence(origin: Vector3, cells_x: int, cells_z: int) -> void:
+	var lib := MeshLibrary.new()
+	var panel := BoxMesh.new()
+	panel.size = Vector3(1.85, 1.35, 0.16)
+	panel.material = _paint(Color(0.58, 0.57, 0.54))
+	lib.create_item(0)
+	lib.set_item_name(0, "fence")
+	lib.set_item_mesh(0, panel)
+	var post := BoxMesh.new()
+	post.size = Vector3(0.28, 2.1, 0.28)
+	post.material = _paint(Color(0.42, 0.42, 0.4))
+	lib.create_item(1)
+	lib.set_item_name(1, "post")
+	lib.set_item_mesh(1, post)
+	var grid := GridMap.new()
+	grid.mesh_library = lib
+	grid.cell_size = Vector3(2.0, 2.0, 2.0)
+	grid.position = origin + Vector3(0.0, -0.55, 0.0)
+	add_child(grid)
+	for i in cells_x:
+		grid.set_cell_item(Vector3i(i, 0, 0), 0 if i % 2 == 0 else 1)
+		grid.set_cell_item(Vector3i(i, 0, cells_z), 0 if i % 2 == 0 else 1)
+	for i in cells_z:
+		grid.set_cell_item(Vector3i(0, 0, i), 1 if i % 2 == 0 else 0)
+		grid.set_cell_item(Vector3i(cells_x, 0, i), 1 if i % 2 == 0 else 0)
+	var y := origin.y + 0.7
+	var span_x := float(cells_x) * 2.0
+	var span_z := float(cells_z) * 2.0
+	_fence_solid(origin + Vector3(span_x * 0.5, 0.7, 0.0), Vector3(span_x * 0.5, 0.7, 0.2))
+	_fence_solid(origin + Vector3(span_x * 0.5, 0.7, span_z), Vector3(span_x * 0.5, 0.7, 0.2))
+	_fence_solid(origin + Vector3(0.0, 0.7, span_z * 0.5), Vector3(0.2, 0.7, span_z * 0.5))
+	_fence_solid(origin + Vector3(span_x, 0.7, span_z * 0.5), Vector3(0.2, 0.7, span_z * 0.5))
+
+
+func _fence_solid(center: Vector3, half: Vector3) -> void:
+	solids.append({
+		"kind": "box",
+		"center": center,
+		"half": half,
+		"yaw": 0.0,
+		"note": "Столкновение с бетонным забором промзоны.",
+	})
+
+
+func _add_yard_pipes(ground: float) -> void:
+	var joints: Array[Vector3] = [
+		Vector3(160.0, ground + 0.45, 8.0),
+		Vector3(170.0, ground + 0.45, 8.0),
+		Vector3(170.0, ground + 0.45, 14.0),
+	]
+	for i in joints.size() - 1:
+		var a: Vector3 = joints[i]
+		var b: Vector3 = joints[i + 1]
+		var mid := (a + b) * 0.5
+		var span := b - a
+		var pipe := MeshInstance3D.new()
+		var mesh := CylinderMesh.new()
+		mesh.top_radius = 0.22
+		mesh.bottom_radius = 0.22
+		mesh.height = maxf(span.length(), 0.4)
+		pipe.mesh = mesh
+		pipe.position = mid
+		pipe.basis = _along(span.normalized())
+		pipe.material_override = _metal(Color(0.42, 0.45, 0.4))
+		_far(pipe, 200.0)
+		add_child(pipe)
+		solids.append({
+			"kind": "box",
+			"center": mid,
+			"half": Vector3(maxf(absf(span.x), 0.3) * 0.5 + 0.2, 0.28, maxf(absf(span.z), 0.3) * 0.5 + 0.2),
+			"yaw": 0.0,
+			"note": "Столкновение с трубой промзоны.",
+		})
+
+
+func _build_fpv_track() -> void:
+	var path := Path3D.new()
+	var curve := Curve3D.new()
+	curve.bake_interval = 6.0
+	var points := _fpv_points()
+	for point in points:
+		curve.add_point(Vector3(point.x, sample_height(point.x, point.z) + 3.2, point.z))
+	path.curve = curve
+	add_child(path)
+	var baked := curve.get_baked_points()
+	var step := 5
+	var index := step
+	var gate := 0
+	while index < baked.size() - 2:
+		var here: Vector3 = baked[index]
+		var nxt: Vector3 = baked[mini(index + 1, baked.size() - 1)]
+		var forward := nxt - here
+		if gate % 2 == 0:
+			_add_facing_ring(here, forward, 2.15)
+		else:
+			var side := 1.0 if gate % 4 == 1 else -1.0
+			var flat := Vector3(forward.x, 0.0, forward.z)
+			if flat.length() < 0.01:
+				flat = Vector3(1.0, 0.0, 0.0)
+			flat = flat.normalized()
+			var left := Vector3(-flat.z, 0.0, flat.x)
+			var spot := here + left * 3.4 * side
+			_add_flag(spot.x, spot.z)
+		gate += 1
+		index += step
+	if baked.size() > 8:
+		var mid := int(baked.size() / 2)
+		var a: Vector3 = baked[mid]
+		var b: Vector3 = baked[mini(mid + 1, baked.size() - 1)]
+		var ground_y := sample_height(a.x, a.z)
+		_add_facing_pipe(Vector3(a.x, ground_y + 2.35, a.z), b - a)
+
+
+func _add_facing_ring(center: Vector3, forward: Vector3, hole: float) -> void:
+	var root := Node3D.new()
+	root.position = center
+	add_child(root)
+	var flat := Vector3(forward.x, 0.0, forward.z)
+	if flat.length() < 0.01:
+		flat = Vector3(0.0, 0.0, 1.0)
+	flat = flat.normalized()
+	root.look_at(center - flat, Vector3.UP)
+	var ring := MeshInstance3D.new()
+	ring.mesh = _ring_mesh(hole + 0.3, 0.3)
+	var paint := _metal(Color(0.78, 0.32, 0.18))
+	paint.cull_mode = BaseMaterial3D.CULL_DISABLED
+	ring.material_override = paint
+	_far(ring, 210.0)
+	root.add_child(ring)
+	solids.append({
+		"kind": "ring",
+		"center": center,
+		"axis": flat,
+		"major": hole + 0.3,
+		"tube": 0.3,
+		"note": "Столкновение с кольцом трассы. Проходите в отверстие.",
+	})
+
+
+func _add_flag(x: float, z: float) -> void:
+	var y := sample_height(x, z)
+	var post := MeshInstance3D.new()
+	var mesh := CylinderMesh.new()
+	mesh.top_radius = 0.06
+	mesh.bottom_radius = 0.08
+	mesh.height = 2.8
+	post.mesh = mesh
+	post.position = Vector3(x, y + 1.4, z)
+	post.material_override = _paint(Color(0.85, 0.25, 0.15))
+	_far(post, 180.0)
+	add_child(post)
+	var flag := MeshInstance3D.new()
+	var cloth := BoxMesh.new()
+	cloth.size = Vector3(0.7, 0.38, 0.04)
+	flag.mesh = cloth
+	flag.position = Vector3(x + 0.35, y + 2.5, z)
+	flag.material_override = _paint(Color(0.9, 0.75, 0.15))
+	_far(flag, 180.0)
+	add_child(flag)
+	_add_solid(x, z, 0.18, 2.8, "Столкновение с флажком слалома. Это препятствие трассы.")
+
+
+func _add_facing_pipe(center: Vector3, forward: Vector3) -> void:
+	var flat := Vector3(forward.x, 0.0, forward.z)
+	if flat.length() < 0.01:
+		flat = Vector3(0.0, 0.0, 1.0)
+	flat = flat.normalized()
+	var length := 12.0
+	var root := Node3D.new()
+	root.position = center
+	add_child(root)
+	root.look_at(center + flat, Vector3.UP)
+	var pipe := MeshInstance3D.new()
+	pipe.mesh = _tube_mesh(length, 1.9, 2.35)
+	var paint := _paint(Color(0.42, 0.48, 0.44))
+	paint.cull_mode = BaseMaterial3D.CULL_DISABLED
+	pipe.material_override = paint
+	_far(pipe, 210.0)
+	root.add_child(pipe)
+	solids.append({
+		"kind": "pipe",
+		"center": center,
+		"axis": flat,
+		"length": length,
+		"inner": 1.9,
+		"outer": 2.35,
+		"note": "Столкновение со стенкой тоннеля трассы. Держитесь просвета.",
+	})
+
+
+func _far(node: GeometryInstance3D, end: float) -> void:
+	node.visibility_range_end = end
+	node.visibility_range_end_margin = 28.0
+	node.visibility_range_fade_mode = GeometryInstance3D.VISIBILITY_RANGE_FADE_SELF
+
+
 func _build_grass() -> void:
-	var mesh := _grass_mesh()
-	var multi := MultiMesh.new()
-	multi.transform_format = MultiMesh.TRANSFORM_3D
-	multi.mesh = mesh
-	var spots: Array[Vector3] = []
+	# Пакеты по клеткам. Иначе дальность считается от центра поля, и трава пропадает под носом.
 	var rng := RandomNumberGenerator.new()
 	rng.seed = 23
+	var buckets: Dictionary = {}
 	var guard := 0
-	while spots.size() < 4500 and guard < 12000:
+	var made := 0
+	while made < 5200 and guard < 14000:
 		guard += 1
-		var x := rng.randf_range(-70.0, 70.0)
-		var z := rng.randf_range(-40.0, 55.0)
-		if _pond_field(x, z) > 0.05 or _on_course(x, z) or Vector2(x, z).length() < 14.0:
+		var x := rng.randf_range(-190.0, 200.0)
+		var z := rng.randf_range(-210.0, 250.0)
+		if Vector2(x, z).length() < 12.0 or _on_course(x, z) or _pond_field(x, z) > 0.08:
 			continue
-		if sample_height(x, z) > 4.5:
+		if _canyon_field(x, z) > 0.2 or _fpv_distance(x, z) < 5.0:
 			continue
-		spots.append(Vector3(x, sample_height(x, z), z))
-	multi.use_colors = true
-	multi.instance_count = spots.size()
-	for i in spots.size():
-		var spot := spots[i]
-		var basis := Basis(Vector3.UP, rng.randf_range(0.0, TAU)).scaled(Vector3.ONE * rng.randf_range(0.7, 1.3))
-		multi.set_instance_transform(i, Transform3D(basis, spot))
-		multi.set_instance_color(i, Color(0.72 + rng.randf() * 0.35, 0.9, 0.7))
-	var grass := MultiMeshInstance3D.new()
-	grass.multimesh = multi
-	grass.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	grass.visibility_range_end = 75.0
-	var grass_paint := _paint(Color(0.22, 0.46, 0.18))
-	grass_paint.vertex_color_use_as_albedo = true
-	grass.material_override = grass_paint
-	add_child(grass)
+		var h := sample_height(x, z)
+		if h < WATER_Y + 0.2 or h > 5.0:
+			continue
+		var kind := rng.randi_range(0, 3)
+		var key := "%d:%d:%d" % [int(floor(x / 64.0)), int(floor(z / 64.0)), kind]
+		if not buckets.has(key):
+			buckets[key] = []
+		var chunk: Array = buckets[key]
+		var scale := rng.randf_range(0.75, 1.25)
+		var basis := Basis(Vector3.UP, rng.randf() * TAU).scaled(Vector3(scale, scale, scale))
+		chunk.append(Transform3D(basis, Vector3(x, h, z)))
+		buckets[key] = chunk
+		made += 1
+	var paints: Array[Color] = [
+		Color(0.36, 0.58, 0.2),
+		Color(0.2, 0.46, 0.16),
+		Color(0.16, 0.34, 0.12),
+		Color(0.42, 0.5, 0.18),
+	]
+	for key in buckets:
+		var rows: Array = buckets[key]
+		if rows.is_empty():
+			continue
+		var parts := str(key).split(":")
+		var kind := 0
+		if parts.size() > 2:
+			kind = int(parts[2])
+		var origin := Vector3(float(parts[0]) * 64.0 + 32.0, 0.0, float(parts[1]) * 64.0 + 32.0)
+		var multi := MultiMesh.new()
+		multi.transform_format = MultiMesh.TRANSFORM_3D
+		multi.mesh = _grass_kind_mesh(kind)
+		multi.instance_count = rows.size()
+		for i in rows.size():
+			var world := rows[i] as Transform3D
+			multi.set_instance_transform(i, Transform3D(world.basis, world.origin - origin))
+		var node := MultiMeshInstance3D.new()
+		node.position = origin
+		node.multimesh = multi
+		node.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		node.visibility_range_end = 150.0
+		node.visibility_range_end_margin = 36.0
+		node.visibility_range_fade_mode = GeometryInstance3D.VISIBILITY_RANGE_FADE_SELF
+		node.extra_cull_margin = 6.0
+		var paint := _paint(paints[kind])
+		paint.cull_mode = BaseMaterial3D.CULL_DISABLED
+		node.material_override = paint
+		add_child(node)
+
+
+func _grass_kind_mesh(kind: int) -> ArrayMesh:
+	var key := 100 + kind
+	if _mesh_cache.has(key):
+		return _mesh_cache[key]
+	var tool := SurfaceTool.new()
+	tool.begin(Mesh.PRIMITIVE_TRIANGLES)
+	if kind == 0:
+		_tuft_blade(tool, 0.0, 0.42, 0.16)
+		_tuft_blade(tool, 1.1, 0.34, 0.12)
+	elif kind == 1:
+		_tuft_blade(tool, 0.2, 0.72, 0.1)
+		_tuft_blade(tool, 1.7, 0.58, 0.08)
+	elif kind == 2:
+		_tuft_blade(tool, 0.4, 1.05, 0.07)
+		_tuft_blade(tool, 1.5, 0.86, 0.06)
+		_tuft_blade(tool, 2.4, 0.7, 0.05)
+	else:
+		_tuft_blade(tool, 0.0, 0.5, 0.2)
+		_tuft_blade(tool, PI * 0.5, 0.46, 0.16)
+		_tuft_blade(tool, 0.8, 0.38, 0.14)
+	tool.generate_normals()
+	var mesh := tool.commit()
+	_mesh_cache[key] = mesh
+	return mesh
+
+
+func _tuft_blade(tool: SurfaceTool, yaw: float, height: float, half_w: float) -> void:
+	var c := cos(yaw)
+	var s := sin(yaw)
+	var a := Vector3(-half_w * c, 0.0, -half_w * s)
+	var b := Vector3(half_w * c, 0.0, half_w * s)
+	_tri(tool, a, b, Vector3(half_w * 0.2 * s, height, -half_w * 0.2 * c))
 
 
 func _grass_mesh() -> ArrayMesh:
@@ -1223,20 +1734,24 @@ func _water_material() -> ShaderMaterial:
 	var shader := Shader.new()
 	shader.code = """shader_type spatial;
 render_mode blend_mix, depth_draw_opaque, cull_disabled, specular_schlick_ggx;
+varying float basin_depth;
 void vertex() {
-	VERTEX.y += sin(VERTEX.x * 0.42 + TIME * 1.1) * 0.06;
-	VERTEX.y += cos(VERTEX.z * 0.31 + TIME * 0.7) * 0.04;
+	basin_depth = COLOR.r;
+	VERTEX.y += sin(VERTEX.x * 0.35 + TIME * 0.9) * 0.04;
+	VERTEX.y += cos(VERTEX.z * 0.28 + TIME * 0.6) * 0.03;
 }
 void fragment() {
-	float fresnel = pow(1.0 - clamp(dot(NORMAL, VIEW), 0.0, 1.0), 2.4);
-	vec3 deep = vec3(0.04, 0.2, 0.36);
-	vec3 shallow = vec3(0.12, 0.42, 0.55);
-	vec3 color = mix(deep, shallow, COLOR.r);
-	color = mix(color, vec3(0.62, 0.78, 0.86), fresnel * 0.5);
+	float fresnel = pow(1.0 - clamp(dot(NORMAL, VIEW), 0.0, 1.0), 2.2);
+	vec3 shallow = vec3(0.28, 0.58, 0.56);
+	vec3 deep = vec3(0.02, 0.07, 0.14);
+	vec3 color = mix(shallow, deep, smoothstep(0.08, 0.72, basin_depth));
+	color = mix(color, vec3(0.7, 0.84, 0.9), fresnel * 0.4);
 	ALBEDO = color;
-	ALPHA = mix(0.78, 0.55, fresnel);
-	ROUGHNESS = mix(0.2, 0.05, fresnel);
-	METALLIC = 0.05;
+	// Берег прозрачный, глубина тёмная. Экранный Depth Fade в Compatibility нет.
+	ALPHA = mix(0.16, 0.88, smoothstep(0.0, 0.42, basin_depth));
+	ALPHA = mix(ALPHA, min(ALPHA, 0.62), fresnel);
+	ROUGHNESS = mix(0.22, 0.05, fresnel);
+	METALLIC = 0.04;
 }
 """
 	var mat := ShaderMaterial.new()

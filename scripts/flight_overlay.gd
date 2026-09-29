@@ -7,10 +7,15 @@ const FlightModel = preload("res://scripts/flight_model.gd")
 
 var sensors_on := false
 var aero_on := false
+var wind_on := false
+var thrust_on := false
+var drag_on := false
 
 var _cone: Node3D
 var _speed: Node3D
 var _wind: Node3D
+var _thrust: Node3D
+var _drag: Node3D
 
 
 func setup() -> void:
@@ -33,6 +38,12 @@ func setup() -> void:
 	_wind = _make_arrow(Color(0.4, 0.74, 0.98, 0.62))
 	_wind.position = Vector3(0.0, 0.08, 0.0)
 	add_child(_wind)
+	_thrust = _make_arrow(Color(0.35, 0.9, 0.42, 0.6))
+	_thrust.position = Vector3(0.0, 0.05, 0.0)
+	add_child(_thrust)
+	_drag = _make_arrow(Color(0.92, 0.32, 0.28, 0.6))
+	_drag.position = Vector3(0.0, 0.02, 0.0)
+	add_child(_drag)
 
 
 func _process(_delta: float) -> void:
@@ -41,16 +52,29 @@ func _process(_delta: float) -> void:
 	var body := get_parent() as Node3D
 	if body == null:
 		return
+	var model: Dictionary = body.get("model")
+	var mass := maxf(float(model.get("mass", 0.2)), 0.05)
+	var weight := mass * 9.81
 	if _speed != null:
 		if aero_on:
-			_aim(_speed, body.get("velocity"), 0.32)
+			_aim(_speed, body.get("velocity"), 0.22, 2.6)
 		else:
 			_speed.visible = false
 	if _wind != null:
-		if aero_on:
-			_aim(_wind, body.get("wind"), 0.32)
+		if wind_on:
+			_aim(_wind, body.get("wind"), 0.22, 2.4)
 		else:
 			_wind.visible = false
+	if _thrust != null:
+		if thrust_on:
+			_aim(_thrust, body.get("thrust_force"), 1.2 / weight, 2.2)
+		else:
+			_thrust.visible = false
+	if _drag != null:
+		if drag_on:
+			_aim(_drag, body.get("drag_force"), 2.4 / weight, 2.2)
+		else:
+			_drag.visible = false
 
 
 func _build_cone(fov_deg: float) -> Node3D:
@@ -134,14 +158,14 @@ func _make_arrow(color: Color) -> Node3D:
 	return root
 
 
-func _aim(arrow: Node3D, dir: Vector3, meters_per_speed: float) -> void:
+func _aim(arrow: Node3D, dir: Vector3, meters_per_speed: float, limit: float = 2.6) -> void:
 	var speed := dir.length()
 	var length := speed * meters_per_speed
-	if length < 0.35:
+	if length < 0.28:
 		arrow.visible = false
 		return
 	arrow.visible = true
-	length = minf(length, 4.8)
+	length = minf(length, limit)
 	var up := Vector3.UP
 	if absf(dir.normalized().dot(Vector3.UP)) > 0.96:
 		up = Vector3.RIGHT

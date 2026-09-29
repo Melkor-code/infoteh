@@ -1,6 +1,7 @@
 extends Node3D
 
 const FlightModel = preload("res://scripts/flight_model.gd")
+const CanopyDrag = preload("res://scripts/canopy_drag.gd")
 
 ## Упрощённый квадрокоптер на этом шаге.
 ## Четыре мотора свёрнуты в одну тягу и наклон корпуса. Этого хватает, чтобы
@@ -28,6 +29,8 @@ var air_density := 1.225
 var air_temp := 15.0
 var precip := 0
 var canopy := 0.0
+var canopy_gust := Vector3.ZERO
+var water_surface := 0.0
 var surface_y := 0.0
 var surface_kind := 0
 var slope_accel := Vector3.ZERO
@@ -97,8 +100,7 @@ func step(delta: float) -> void:
 	elif precip == 3:
 		drag_k *= FlightModel.HAIL_DRAG
 	# Крона — допущение, не паспорт. Листва не стена: она сильно растит сопротивление.
-	if canopy > 0.2:
-		drag_k *= 1.0 + 1.8 * canopy
+	drag_k *= CanopyDrag.drag_scale(canopy)
 	var max_tilt := deg_to_rad(32.0)
 	# W/S уже совпадали с картинкой. A/D и Q/E в Godot на виде сзади получались зеркальными:
 	# положительный крен уезжал вправо при нажатии A, положительное рыскание крутило влево при E.
@@ -165,13 +167,13 @@ func step(delta: float) -> void:
 		velocity = velocity.limit_length(40.0)
 	position += velocity * delta
 
-	if surface_kind == 1 and position.y <= clearance + 0.02:
+	if surface_kind == 1 and position.y <= water_surface + clearance + 0.02:
 		ditched = true
 		motors_on = false
 		altitude_hold = false
 		throttle = 0.0
 		velocity = Vector3.ZERO
-		position.y = clearance
+		position.y = water_surface + clearance
 		airborne = false
 		warning = "Касание воды: моторы выключены. Сесть можно только на причал."
 	elif position.y <= floor_y:

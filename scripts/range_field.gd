@@ -599,12 +599,12 @@ func _mesh_oak(tool: SurfaceTool, jitter: float) -> void:
 	var bark := Color(0.36, 0.23, 0.12)
 	var leaf := Color(0.16, 0.42, 0.15).lerp(Color(0.26, 0.5, 0.18), jitter * 3.0)
 	_add_cylinder(tool, Vector3.ZERO, Vector3.UP, 0.34, 0.2, 2.35, bark, 6)
-	var arms := [Vector3(1.1, 0.65, 0.28), Vector3(-1.0, 0.72, 0.4), Vector3(0.22, 0.8, -1.1), Vector3(-0.3, 0.5, 1.0)]
+	var arms: Array[Vector3] = [Vector3(1.1, 0.65, 0.28), Vector3(-1.0, 0.72, 0.4), Vector3(0.22, 0.8, -1.1), Vector3(-0.3, 0.5, 1.0)]
 	for arm in arms:
-		var dir := arm.normalized()
+		var dir: Vector3 = arm.normalized()
 		var start := Vector3(0.0, 1.7 + jitter, 0.0)
 		_add_cylinder(tool, start, dir, 0.08, 0.04, arm.length(), bark, 5)
-		var tip := start + dir * arm.length()
+		var tip: Vector3 = start + dir * arm.length()
 		_add_cylinder(tool, tip + Vector3(0.0, -0.15, 0.0), Vector3.UP, 0.78, 0.07, 1.25, leaf, 6)
 
 

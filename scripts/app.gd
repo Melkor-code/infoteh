@@ -26,9 +26,9 @@ var turbulence_on := false
 var camera_mode := 0
 var craft: Quadrotor
 var camera: Camera3D
-var rain: CPUParticles3D
-var snow: CPUParticles3D
-var hail: CPUParticles3D
+var rain: GPUParticles3D
+var snow: GPUParticles3D
+var hail: GPUParticles3D
 var field
 var wind_arrow: Node3D
 var log_lines: PackedStringArray = []
@@ -171,20 +171,38 @@ func _build_world() -> void:
 	var environment := Environment.new()
 	var sky := Sky.new()
 	var sky_mat := ProceduralSkyMaterial.new()
-	sky_mat.sky_top_color = Color(0.32, 0.52, 0.82)
-	sky_mat.sky_horizon_color = Color(0.78, 0.82, 0.86)
-	sky_mat.ground_bottom_color = Color(0.22, 0.3, 0.18)
-	sky_mat.ground_horizon_color = Color(0.55, 0.58, 0.48)
+	sky_mat.sky_top_color = Color(0.28, 0.48, 0.82)
+	sky_mat.sky_horizon_color = Color(0.72, 0.8, 0.88)
+	sky_mat.ground_bottom_color = Color(0.2, 0.28, 0.16)
+	sky_mat.ground_horizon_color = Color(0.5, 0.54, 0.42)
+	sky_mat.sky_curve = 0.12
+	sky_mat.sun_angle_max = 26.0
 	sky.sky_material = sky_mat
 	environment.sky = sky
+	environment.background_mode = Environment.BG_SKY
 	environment.ambient_light_source = Environment.AMBIENT_SOURCE_SKY
-	environment.ambient_light_energy = 0.85
+	environment.ambient_light_energy = 0.7
+	environment.tonemap_mode = Environment.TONE_MAPPER_FILMIC
+	# Обычный туман даёт глубину в Compatibility. Объёмный туман и SSAO этот рендер не рисует.
+	environment.fog_enabled = true
+	environment.fog_mode = Environment.FOG_MODE_EXPONENTIAL
+	environment.fog_density = 0.0016
+	environment.fog_light_color = Color(0.72, 0.78, 0.84)
+	environment.fog_sun_scatter = 0.12
+	environment.glow_enabled = true
+	environment.glow_intensity = 0.25
+	environment.glow_strength = 0.45
+	environment.glow_bloom = 0.04
 	env.environment = environment
 	add_child(env)
 
 	var sun := DirectionalLight3D.new()
-	sun.rotation_degrees = Vector3(-48, 35, 0)
-	sun.light_energy = 1.2
+	sun.rotation_degrees = Vector3(-42, 32, 0)
+	sun.light_energy = 1.15
+	sun.shadow_enabled = true
+	sun.shadow_blur = 1.4
+	sun.directional_shadow_mode = DirectionalLight3D.SHADOW_PARALLEL_2_SPLITS
+	sun.directional_shadow_max_distance = 150.0
 	add_child(sun)
 
 	field = RangeField.new()
@@ -735,26 +753,30 @@ func _apply_terrain() -> void:
 	terrain_hint.text = "Одно поле: площадка, гряда на севере, пруд справа, роща слева и дорожка испытаний на юге. Выбор только переносит старт."
 
 
-func _make_precip(amount: int, life: float, speed_min: float, speed_max: float, drop_size: Vector2, color: Color, gravity: Vector3) -> CPUParticles3D:
-	var particles := CPUParticles3D.new()
+func _make_precip(amount: int, life: float, speed_min: float, speed_max: float, drop_size: Vector2, color: Color, gravity: Vector3) -> GPUParticles3D:
+	var particles := GPUParticles3D.new()
 	particles.amount = amount
 	particles.lifetime = life
 	particles.preprocess = 0.4
 	particles.emitting = false
-	particles.emission_shape = CPUParticles3D.EMISSION_SHAPE_BOX
-	particles.emission_box_extents = Vector3(16, 0.4, 16)
-	particles.direction = Vector3(0.15, -1, 0.1)
-	particles.spread = 8.0
-	particles.gravity = gravity
-	particles.initial_velocity_min = speed_min
-	particles.initial_velocity_max = speed_max
+	var process := ParticleProcessMaterial.new()
+	process.emission_shape = ParticleProcessMaterial.EMISSION_SHAPE_BOX
+	process.emission_box_extents = Vector3(18, 0.4, 18)
+	process.direction = Vector3(0.15, -1, 0.1)
+	process.spread = 8.0
+	process.gravity = gravity
+	process.initial_velocity_min = speed_min
+	process.initial_velocity_max = speed_max
+	particles.process_material = process
 	var drop := QuadMesh.new()
 	drop.size = drop_size
 	var material := StandardMaterial3D.new()
 	material.albedo_color = color
 	material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	drop.material = material
-	particles.mesh = drop
+	particles.draw_pass_1 = drop
+	particles.visibility_aabb = AABB(Vector3(-24, -20, -24), Vector3(48, 40, 48))
 	add_child(particles)
 	return particles
 

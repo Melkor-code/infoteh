@@ -23,15 +23,29 @@ const COURSE_Z1 := 300.0
 
 var crowns: Array[Dictionary] = []
 var solids: Array[Dictionary] = []
+var relief_noise := FastNoiseLite.new()
+var valley_noise := FastNoiseLite.new()
 
 
 func build() -> void:
+	# Шум создаётся один раз. И картинка, и посадка читают одну и ту же функцию.
+	relief_noise.noise_type = FastNoiseLite.TYPE_SIMPLEX_SMOOTH
+	relief_noise.frequency = 0.015
+	relief_noise.fractal_type = FastNoiseLite.FRACTAL_FBM
+	relief_noise.fractal_octaves = 4
+	relief_noise.seed = 41
+	valley_noise.noise_type = FastNoiseLite.TYPE_SIMPLEX_SMOOTH
+	valley_noise.frequency = 0.009
+	valley_noise.seed = 88
 	_build_ground()
 	_build_water()
 	_build_pier()
 	_build_pad_marks()
 	_scatter_nature()
 	_build_course()
+	_build_road()
+	_build_yard()
+	_build_grass()
 	_add_sign("СЕВЕР", Vector3(0.0, 14.0, -230.0))
 	_add_sign("ГРЯДА", Vector3(8.0, 12.0, -150.0))
 	_add_sign("ПРУД", Vector3(96.0, 4.0, 22.0))
@@ -40,7 +54,7 @@ func build() -> void:
 
 
 func sample_height(x: float, z: float) -> float:
-	var h := _waves(x, z) + _mounds(x, z) + _pond_dent(x, z)
+	var h := _waves(x, z) + _relief(x, z) + _mounds(x, z) + _pond_dent(x, z)
 	var pad := Vector2(x, z).length()
 	if pad < PAD_BLEND:
 		h = lerpf(0.0, h, smoothstep(PAD_FLAT, PAD_BLEND, pad))
@@ -130,10 +144,7 @@ func _build_ground() -> void:
 	tool.generate_normals()
 	var mesh_node := MeshInstance3D.new()
 	mesh_node.mesh = tool.commit()
-	var paint := StandardMaterial3D.new()
-	paint.vertex_color_use_as_albedo = true
-	paint.roughness = 0.94
-	mesh_node.material_override = paint
+	mesh_node.material_override = _ground_material()
 	add_child(mesh_node)
 
 
@@ -148,6 +159,7 @@ func _ground_quad(tool: SurfaceTool, x0: float, z0: float, x1: float, z1: float)
 
 func _ground_vertex(tool: SurfaceTool, x: float, z: float) -> void:
 	var h := sample_height(x, z)
+	tool.set_uv(Vector2(x, z) * 0.04)
 	tool.set_color(_tint(h, x, z))
 	tool.add_vertex(Vector3(x, h, z))
 
@@ -161,9 +173,58 @@ func _tint(h: float, x: float, z: float) -> Color:
 	var tint := grass.lerp(sand, shore)
 	if in_grove(Vector3(x, 0.0, z)):
 		tint = tint.lerp(moss, 0.45)
-	if h > 3.0:
-		tint = tint.lerp(rock, clampf((h - 3.0) / 5.0, 0.0, 1.0))
-	return tint * (0.9 + 0.1 * sin(x * 0.17 + z * 0.11))
+	if h > 3.2:
+		tint = tint.lerp(rock, clampf((h - 3.2) / 5.0, 0.0, 1.0))
+	if h > 7.4:
+		tint = tint.lerp(Color(0.9, 0.92, 0.94), clampf((h - 7.4) / 2.2, 0.0, 1.0))
+	return tint
+
+
+func _relief(x: float, z: float) -> float:
+	# FastNoiseLite: холмы и узкие овраги. Площадка, причал и дорожка потом выравниваются.
+	var hill := relief_noise.get_noise_2d(x, z)
+	var cut := pow(1.0 - absf(valley_noise.get_noise_2d(x, z)), 4.0)
+	return hill * 1.7 - cut * 2.2
+
+
+func _ground_material() -> ShaderMaterial:
+	var shader := Shader.new()
+	shader.code = """shader_type spatial;
+render_mode diffuse_burley, specular_schlick_ggx;
+uniform sampler2D detail : repeat_enable;
+varying vec3 world_normal;
+varying float height_m;
+void vertex() {
+	world_normal = normalize((MODEL_MATRIX * vec4(NORMAL, 0.0)).xyz);
+	height_m = (MODEL_MATRIX * vec4(VERTEX, 1.0)).y;
+}
+void fragment() {
+	float grain = texture(detail, UV).r;
+	float slope = clamp(world_normal.y, 0.0, 1.0);
+	vec3 rock = vec3(0.45, 0.43, 0.39);
+	vec3 snow = vec3(0.88, 0.90, 0.93);
+	vec3 albedo = mix(rock, COLOR.rgb, smoothstep(0.40, 0.78, slope));
+	float snow_mix = smoothstep(7.2, 9.2, height_m) * smoothstep(0.5, 0.88, slope);
+	albedo = mix(albedo, snow, snow_mix);
+	albedo *= 0.76 + 0.38 * grain;
+	ALBEDO = albedo;
+	ROUGHNESS = mix(0.94, 0.58, snow_mix);
+}
+"""
+	var noise := FastNoiseLite.new()
+	noise.noise_type = FastNoiseLite.TYPE_SIMPLEX
+	noise.frequency = 0.08
+	noise.fractal_type = FastNoiseLite.FRACTAL_FBM
+	noise.fractal_octaves = 3
+	var tex := NoiseTexture2D.new()
+	tex.noise = noise
+	tex.width = 256
+	tex.height = 256
+	tex.seamless = true
+	var mat := ShaderMaterial.new()
+	mat.shader = shader
+	mat.set_shader_parameter("detail", tex)
+	return mat
 
 
 func _waves(x: float, z: float) -> float:
@@ -250,11 +311,7 @@ func _build_water() -> void:
 			_water_vertex(tool, x0, z1)
 	var water := MeshInstance3D.new()
 	water.mesh = tool.commit()
-	var paint := StandardMaterial3D.new()
-	paint.albedo_color = Color(0.12, 0.38, 0.62, 0.82)
-	paint.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	paint.roughness = 0.16
-	water.material_override = paint
+	water.material_override = _water_material()
 	add_child(water)
 
 
@@ -385,6 +442,12 @@ func _add_tree(x: float, z: float, kind: int, size: float) -> void:
 		crown_base = 3.6
 		crown_top = 6.8
 	_add_solid(x, z, trunk_r * size, trunk_h * size, "Столкновение со стволом. Облетите дерево: сквозь ствол не пройти.")
+	# Дальние деревья не рисуются. Диапазон видимости есть у сетки, не у пустого узла.
+	for child in root.get_children():
+		var shown := child as GeometryInstance3D
+		if shown != null:
+			shown.visibility_range_end = 180.0
+			shown.visibility_range_end_margin = 20.0
 	crowns.append({
 		"x": x,
 		"z": z,
@@ -533,10 +596,11 @@ func _add_ring(center: Vector3, hole: float, tube: float) -> void:
 	var major := hole + tube
 	ring.mesh = _ring_mesh(major, tube)
 	ring.position = center
-	var ring_paint := _paint(Color(0.85, 0.25, 0.18))
+	var ring_paint := _metal(Color(0.72, 0.74, 0.76))
 	ring_paint.cull_mode = BaseMaterial3D.CULL_DISABLED
 	ring.material_override = ring_paint
 	add_child(ring)
+	_add_gate_frame(center, hole)
 	solids.append({
 		"kind": "ring",
 		"center": center,
@@ -622,6 +686,161 @@ func _ring_mesh(major: float, tube: float) -> ArrayMesh:
 
 func _tube_offset(radial: Vector3, angle: float, tube: float) -> Vector3:
 	return radial * cos(angle) * tube + Vector3(0.0, 0.0, sin(angle) * tube)
+
+
+func _add_gate_frame(center: Vector3, hole: float) -> void:
+	var metal := _metal(Color(0.62, 0.64, 0.66))
+	var span := hole + 1.3
+	for side in [-1.0, 1.0]:
+		var post := MeshInstance3D.new()
+		var box := BoxMesh.new()
+		box.size = Vector3(0.28, center.y + span, 0.28)
+		post.mesh = box
+		post.position = Vector3(center.x + side * span, (center.y + span) * 0.5, center.z)
+		post.material_override = metal
+		add_child(post)
+		_add_solid(center.x + side * span, center.z, 0.28, center.y + span, "Столкновение со стойкой ворот. Проходите в проём.")
+	var header := MeshInstance3D.new()
+	var bar := BoxMesh.new()
+	bar.size = Vector3(span * 2.0 + 0.4, 0.28, 0.28)
+	header.mesh = bar
+	header.position = Vector3(center.x, center.y + span, center.z)
+	header.material_override = metal
+	add_child(header)
+
+
+func _build_road() -> void:
+	var asphalt := _paint(Color(0.28, 0.29, 0.3))
+	asphalt.roughness = 0.82
+	for i in 12:
+		var z := 58.0 + float(i) * 18.0
+		var plate := MeshInstance3D.new()
+		var box := BoxMesh.new()
+		box.size = Vector3(7.0, 0.05, 16.0)
+		plate.mesh = box
+		plate.position = Vector3(0.0, sample_height(0.0, z) + 0.05, z)
+		plate.material_override = asphalt
+		add_child(plate)
+
+
+func _build_yard() -> void:
+	_add_pylon(-24.0, 36.0)
+	_add_pylon(36.0, -28.0)
+	_add_pylon(128.0, 48.0)
+	var blocks := [Vector3(18.0, 0.0, 88.0), Vector3(-18.0, 0.0, 124.0), Vector3(16.0, 0.0, 168.0)]
+	for block in blocks:
+		var y := sample_height(block.x, block.z)
+		var chunk := MeshInstance3D.new()
+		var box := BoxMesh.new()
+		box.size = Vector3(1.8, 1.1, 1.4)
+		chunk.mesh = box
+		chunk.position = Vector3(block.x, y + 0.55, block.z)
+		chunk.material_override = _paint(Color(0.62, 0.62, 0.6))
+		add_child(chunk)
+		_add_solid(block.x, block.z, 1.05, 1.2, "Столкновение с бетонным блоком. Это препятствие, не декорация.")
+
+
+func _add_pylon(x: float, z: float) -> void:
+	var y := sample_height(x, z)
+	var metal := _metal(Color(0.58, 0.6, 0.62))
+	for sx in [-1.0, 1.0]:
+		for sz in [-1.0, 1.0]:
+			var leg := MeshInstance3D.new()
+			var box := BoxMesh.new()
+			box.size = Vector3(0.16, 9.0, 0.16)
+			leg.mesh = box
+			leg.position = Vector3(x + sx * 1.15, y + 4.5, z + sz * 1.15)
+			leg.material_override = metal
+			add_child(leg)
+	var arm := MeshInstance3D.new()
+	var bar := BoxMesh.new()
+	bar.size = Vector3(4.2, 0.14, 0.14)
+	arm.mesh = bar
+	arm.position = Vector3(x, y + 8.2, z)
+	arm.material_override = metal
+	add_child(arm)
+	_add_solid(x, z, 1.5, 9.0, "Столкновение с опорой ЛЭП. Облетите вышку.")
+
+
+func _build_grass() -> void:
+	var mesh := _grass_mesh()
+	var multi := MultiMesh.new()
+	multi.transform_format = MultiMesh.TRANSFORM_3D
+	multi.mesh = mesh
+	var spots: Array[Vector3] = []
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 23
+	var guard := 0
+	while spots.size() < 4500 and guard < 12000:
+		guard += 1
+		var x := rng.randf_range(-70.0, 70.0)
+		var z := rng.randf_range(-40.0, 55.0)
+		if _pond_field(x, z) > 0.05 or _on_course(x, z) or Vector2(x, z).length() < 14.0:
+			continue
+		if sample_height(x, z) > 4.5:
+			continue
+		spots.append(Vector3(x, sample_height(x, z), z))
+	multi.instance_count = spots.size()
+	for i in spots.size():
+		var spot := spots[i]
+		var basis := Basis(Vector3.UP, rng.randf_range(0.0, TAU)).scaled(Vector3.ONE * rng.randf_range(0.7, 1.3))
+		multi.set_instance_transform(i, Transform3D(basis, spot))
+	var grass := MultiMeshInstance3D.new()
+	grass.multimesh = multi
+	grass.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	grass.visibility_range_end = 75.0
+	grass.material_override = _paint(Color(0.22, 0.46, 0.18))
+	add_child(grass)
+
+
+func _grass_mesh() -> ArrayMesh:
+	var tool := SurfaceTool.new()
+	tool.begin(Mesh.PRIMITIVE_TRIANGLES)
+	_grass_quad(tool, 0.0)
+	_grass_quad(tool, PI * 0.5)
+	tool.generate_normals()
+	return tool.commit()
+
+
+func _grass_quad(tool: SurfaceTool, yaw: float) -> void:
+	var c := cos(yaw)
+	var s := sin(yaw)
+	var a := Vector3(-0.08 * c, 0.0, -0.08 * s)
+	var b := Vector3(0.08 * c, 0.0, 0.08 * s)
+	var top := Vector3(0.0, 0.55, 0.0)
+	_tri(tool, a, b, top)
+
+
+func _water_material() -> ShaderMaterial:
+	var shader := Shader.new()
+	shader.code = """shader_type spatial;
+render_mode blend_mix, depth_draw_opaque, cull_disabled, specular_schlick_ggx;
+void vertex() {
+	VERTEX.y += sin(VERTEX.x * 0.42 + TIME * 1.1) * 0.06;
+	VERTEX.y += cos(VERTEX.z * 0.31 + TIME * 0.7) * 0.04;
+}
+void fragment() {
+	float fresnel = pow(1.0 - clamp(dot(NORMAL, VIEW), 0.0, 1.0), 2.4);
+	vec3 deep = vec3(0.04, 0.2, 0.36);
+	vec3 shallow = vec3(0.12, 0.42, 0.55);
+	vec3 color = mix(deep, shallow, COLOR.r);
+	color = mix(color, vec3(0.62, 0.78, 0.86), fresnel * 0.5);
+	ALBEDO = color;
+	ALPHA = mix(0.78, 0.55, fresnel);
+	ROUGHNESS = mix(0.2, 0.05, fresnel);
+	METALLIC = 0.05;
+}
+"""
+	var mat := ShaderMaterial.new()
+	mat.shader = shader
+	return mat
+
+
+func _metal(color: Color) -> StandardMaterial3D:
+	var paint := _paint(color)
+	paint.metallic = 0.62
+	paint.roughness = 0.38
+	return paint
 
 
 func _tube_mesh(length: float, inner_r: float, outer_r: float) -> ArrayMesh:

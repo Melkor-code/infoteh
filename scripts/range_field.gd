@@ -25,6 +25,8 @@ var crowns: Array[Dictionary] = []
 var solids: Array[Dictionary] = []
 var relief_noise := FastNoiseLite.new()
 var valley_noise := FastNoiseLite.new()
+var _mesh_cache: Dictionary = {}
+var _card_shader_res: Shader
 
 
 func build() -> void:
@@ -165,19 +167,39 @@ func _ground_vertex(tool: SurfaceTool, x: float, z: float) -> void:
 
 
 func _tint(h: float, x: float, z: float) -> Color:
-	var grass := Color(0.28, 0.46, 0.22)
-	var sand := Color(0.62, 0.55, 0.36)
-	var rock := Color(0.48, 0.47, 0.43)
-	var moss := Color(0.22, 0.38, 0.2)
-	var shore := clampf(_pond_field(x, z) * 1.4, 0.0, 1.0)
-	var tint := grass.lerp(sand, shore)
+	# Низина темнее, пригорок светлее. Камень и снег сверху это не отменяют.
+	var lift := clampf((h + 0.6) / 5.5, 0.0, 1.0)
+	var grass := Color(0.13, 0.29, 0.1).lerp(Color(0.48, 0.68, 0.3), lift)
+	var sand := Color(0.76, 0.66, 0.42)
+	var dirt := Color(0.46, 0.34, 0.2)
+	var scree := Color(0.52, 0.47, 0.4)
+	var rock := Color(0.48, 0.46, 0.42)
+	var moss := Color(0.16, 0.3, 0.14)
+	var pond := _pond_field(x, z)
+	var beach := clampf(1.0 - absf(pond - 0.18) * 4.2, 0.0, 1.0)
+	var tint := grass.lerp(sand, maxf(clampf(pond * 1.6, 0.0, 1.0), beach * 0.92))
+	var cut := pow(1.0 - absf(valley_noise.get_noise_2d(x, z)), 4.0)
+	if cut > 0.4 and h < 5.5:
+		tint = tint.lerp(scree, clampf((cut - 0.4) * 2.3, 0.0, 0.82))
+	tint = tint.lerp(dirt, _dirt_amount(x, z))
 	if in_grove(Vector3(x, 0.0, z)):
-		tint = tint.lerp(moss, 0.45)
+		tint = tint.lerp(moss, 0.28)
 	if h > 3.2:
 		tint = tint.lerp(rock, clampf((h - 3.2) / 5.0, 0.0, 1.0))
 	if h > 7.4:
 		tint = tint.lerp(Color(0.9, 0.92, 0.94), clampf((h - 7.4) / 2.2, 0.0, 1.0))
 	return tint
+
+
+func _dirt_amount(x: float, z: float) -> float:
+	var amount := 0.0
+	if z > 42.0 and z < 308.0:
+		amount = maxf(amount, 1.0 - smoothstep(3.4, 8.2, absf(x)))
+	if x > 10.0 and x < 64.0 and z > -2.0 and z < 22.0:
+		amount = maxf(amount, 1.0 - smoothstep(1.3, 3.8, absf(z - 6.0)))
+	if x < -8.0 and x > -72.0 and z > -8.0 and z < 18.0:
+		amount = maxf(amount, 1.0 - smoothstep(1.4, 3.6, absf(z - 4.0)))
+	return clampf(amount, 0.0, 0.78)
 
 
 func _relief(x: float, z: float) -> float:
@@ -206,7 +228,7 @@ void fragment() {
 	vec3 albedo = mix(rock, COLOR.rgb, smoothstep(0.40, 0.78, slope));
 	float snow_mix = smoothstep(7.2, 9.2, height_m) * smoothstep(0.5, 0.88, slope);
 	albedo = mix(albedo, snow, snow_mix);
-	albedo *= 0.76 + 0.38 * grain;
+	albedo *= 0.88 + 0.2 * grain;
 	ALBEDO = albedo;
 	ROUGHNESS = mix(0.94, 0.58, snow_mix);
 }
@@ -344,48 +366,39 @@ func _build_pad_marks() -> void:
 
 
 func _scatter_nature() -> void:
+	# Кластеры, не ровная решётка: между куртинами остаются поляны.
+	# Сетка одного дерева общая, поэтому дальний лес не плодит сотни узлов.
 	var rng := RandomNumberGenerator.new()
 	rng.seed = 17
+	var clusters: Array[Vector3] = [
+		Vector3(-78.0, 22.0, 13.0),
+		Vector3(-112.0, 18.0, 14.0),
+		Vector3(-98.0, -6.0, 12.0),
+		Vector3(-68.0, 2.0, 11.0),
+		Vector3(-108.0, 38.0, 12.0),
+		Vector3(-86.0, 40.0, 10.0),
+		Vector3(16.0, -162.0, 14.0),
+		Vector3(-30.0, -38.0, 9.0),
+	]
 	var placed: Array[Vector2] = []
-	var guard := 0
-	while crowns.size() < 42 and guard < 400:
-		guard += 1
-		var x := rng.randf_range(-132.0, -48.0)
-		var z := rng.randf_range(-18.0, 50.0)
-		if not in_grove(Vector3(x, 0.0, z)):
-			continue
-		if _too_close(Vector2(x, z), placed, 6.5):
-			continue
-		if _blocked_spot(x, z):
-			continue
-		placed.append(Vector2(x, z))
-		var kind := rng.randi_range(0, 2)
-		var size := rng.randf_range(0.8, 1.25)
-		_add_tree(x, z, kind, size)
-	guard = 0
-	var rocks := 0
-	while rocks < 16 and guard < 200:
-		guard += 1
-		var x := rng.randf_range(-20.0, 55.0)
-		var z := rng.randf_range(-200.0, -50.0)
-		if sample_height(x, z) < 1.2:
-			continue
-		if _blocked_spot(x, z):
-			continue
-		_add_rock(x, z, rng.randf_range(0.7, 1.5), rng.randf_range(0.0, TAU))
-		rocks += 1
-	guard = 0
-	var bushes := 0
-	while bushes < 14 and guard < 200:
-		guard += 1
-		var x := rng.randf_range(-40.0, 70.0)
-		var z := rng.randf_range(-40.0, 40.0)
-		if _blocked_spot(x, z) or _pond_field(x, z) > 0.05 or in_grove(Vector3(x, 0.0, z)):
-			continue
-		if Vector2(x, z).length() < 22.0:
-			continue
-		_add_bush(x, z, rng.randf_range(0.8, 1.3))
-		bushes += 1
+	for cluster in clusters:
+		var spots: Array[Dictionary] = []
+		var tries := 0
+		var goal := 8 if (cluster.z < 12.0 or cluster.y < -80.0) else 12
+		while spots.size() < goal and tries < 90:
+			tries += 1
+			var ang := rng.randf() * TAU
+			var dist := cluster.z * sqrt(rng.randf())
+			var x := cluster.x + cos(ang) * dist
+			var z := cluster.y + sin(ang) * dist
+			if not _tree_spot_ok(x, z, placed, 3.8):
+				continue
+			placed.append(Vector2(x, z))
+			var kind := _cluster_kind(cluster, rng)
+			var size := rng.randf_range(0.72, 1.22)
+			_remember_tree(spots, x, z, kind, size, rng.randf() * TAU, rng.randi_range(0, 1))
+		_flush_cluster(spots)
+	_scatter_floor(rng)
 
 
 func _blocked_spot(x: float, z: float) -> bool:
@@ -409,114 +422,505 @@ func _too_close(spot: Vector2, placed: Array[Vector2], gap: float) -> bool:
 	return false
 
 
-func _add_tree(x: float, z: float, kind: int, size: float) -> void:
+func _tree_spot_ok(x: float, z: float, placed: Array[Vector2], gap: float) -> bool:
+	if _blocked_spot(x, z) or _pond_field(x, z) > 0.04:
+		return false
+	if sample_height(x, z) < -0.15:
+		return false
+	return not _too_close(Vector2(x, z), placed, gap)
+
+
+func _cluster_kind(cluster: Vector3, rng: RandomNumberGenerator) -> int:
+	# 0 ель, 1 сосна, 2 дуб, 3 берёза, 4 куст. На гряде только хвойные.
+	if cluster.y < -80.0:
+		return 0 if rng.randf() < 0.6 else 1
+	var roll := rng.randf()
+	if roll < 0.26:
+		return 0
+	if roll < 0.5:
+		return 1
+	if roll < 0.72:
+		return 2
+	if roll < 0.88:
+		return 3
+	return 4
+
+
+func _tree_spec(kind: int) -> Dictionary:
+	match kind:
+		0:
+			return {"trunk_r": 0.2, "trunk_h": 2.2, "reach": 1.7, "base": 1.3, "top": 7.0}
+		1:
+			return {"trunk_r": 0.22, "trunk_h": 3.2, "reach": 2.0, "base": 2.3, "top": 7.4}
+		2:
+			return {"trunk_r": 0.34, "trunk_h": 2.5, "reach": 2.6, "base": 1.8, "top": 5.8}
+		3:
+			return {"trunk_r": 0.14, "trunk_h": 4.4, "reach": 1.4, "base": 3.2, "top": 6.4}
+		_:
+			return {"trunk_r": 0.45, "trunk_h": 1.05, "reach": 0.85, "base": 0.25, "top": 1.3}
+
+
+func _remember_tree(spots: Array[Dictionary], x: float, z: float, kind: int, size: float, yaw: float, variant: int) -> void:
+	var spec := _tree_spec(kind)
 	var y := sample_height(x, z)
-	var root := Node3D.new()
-	root.position = Vector3(x, y, z)
-	root.scale = Vector3.ONE * size
-	add_child(root)
-	var trunk_h := 2.4
-	var trunk_r := 0.28
-	var crown_r := 2.4
-	var crown_base := 1.8
-	var crown_top := 6.5
-	if kind == 0:
-		_pine(root)
-		trunk_h = 2.2
-		trunk_r = 0.26
-		crown_r = 2.3
-		crown_base = 1.6
-		crown_top = 7.4
-	elif kind == 1:
-		_oak(root)
-		trunk_h = 2.6
-		trunk_r = 0.38
-		crown_r = 3.1
-		crown_base = 2.0
-		crown_top = 6.2
-	else:
-		_birch(root)
-		trunk_h = 4.8
-		trunk_r = 0.16
-		crown_r = 1.5
-		crown_base = 3.6
-		crown_top = 6.8
-	_add_solid(x, z, trunk_r * size, trunk_h * size, "Столкновение со стволом. Облетите дерево: сквозь ствол не пройти.")
-	# Дальние деревья не рисуются. Диапазон видимости есть у сетки, не у пустого узла.
-	for child in root.get_children():
-		var shown := child as GeometryInstance3D
-		if shown != null:
-			shown.visibility_range_end = 180.0
-			shown.visibility_range_end_margin = 20.0
+	var note := "Столкновение со стволом. Облетите дерево: сквозь ствол не пройти."
+	if kind == 4:
+		note = "Столкновение с кустом. Это препятствие, не картинка."
+	_add_solid(x, z, float(spec["trunk_r"]) * size, float(spec["trunk_h"]) * size, note)
 	crowns.append({
 		"x": x,
 		"z": z,
-		"reach": crown_r * size,
-		"base": y + crown_base * size,
-		"top": y + crown_top * size,
+		"reach": float(spec["reach"]) * size,
+		"base": y + float(spec["base"]) * size,
+		"top": y + float(spec["top"]) * size,
+	})
+	spots.append({
+		"x": x,
+		"y": y,
+		"z": z,
+		"kind": kind,
+		"size": size,
+		"yaw": yaw,
+		"variant": variant,
 	})
 
 
-func _pine(root: Node3D) -> void:
-	_trunk(root, 0.22, 2.2, Color(0.32, 0.22, 0.12))
-	var greens := [Color(0.1, 0.32, 0.14), Color(0.14, 0.4, 0.16), Color(0.08, 0.28, 0.12)]
+func _flush_cluster(spots: Array[Dictionary]) -> void:
+	if spots.is_empty():
+		return
+	var paint := _foliage_material()
+	for kind in 5:
+		for variant in 2:
+			var subset: Array[Dictionary] = []
+			for spot in spots:
+				if int(spot["kind"]) == kind and int(spot["variant"]) == variant:
+					subset.append(spot)
+			if subset.is_empty():
+				continue
+			var multi := MultiMesh.new()
+			multi.transform_format = MultiMesh.TRANSFORM_3D
+			multi.mesh = _cached_tree_mesh(kind, variant)
+			multi.instance_count = subset.size()
+			for i in subset.size():
+				var spot := subset[i]
+				var basis := Basis(Vector3.UP, float(spot["yaw"])).scaled(Vector3.ONE * float(spot["size"]))
+				multi.set_instance_transform(i, Transform3D(basis, Vector3(float(spot["x"]), float(spot["y"]), float(spot["z"]))))
+			var node := MultiMeshInstance3D.new()
+			node.multimesh = multi
+			node.material_override = paint
+			# Дальше 200 м куртина гаснет и остаётся карточка, не полная сетка.
+			node.visibility_range_end = 200.0
+			node.visibility_range_end_margin = 36.0
+			node.visibility_range_fade_mode = GeometryInstance3D.VISIBILITY_RANGE_FADE_SELF
+			add_child(node)
+		_add_kind_cards(spots, kind)
+
+
+func _add_kind_cards(spots: Array[Dictionary], kind: int) -> void:
+	var subset: Array[Dictionary] = []
+	for spot in spots:
+		if int(spot["kind"]) == kind:
+			subset.append(spot)
+	if subset.is_empty():
+		return
+	var wide := 1.5 if kind == 4 else 2.7
+	var tall := 1.3 if kind == 4 else 6.4
+	var multi := MultiMesh.new()
+	multi.transform_format = MultiMesh.TRANSFORM_3D
+	multi.mesh = _card_mesh(wide, tall)
+	multi.instance_count = subset.size()
+	for i in subset.size():
+		var spot := subset[i]
+		var size := float(spot["size"])
+		var basis := Basis.IDENTITY.scaled(Vector3(size, size, size))
+		multi.set_instance_transform(i, Transform3D(basis, Vector3(float(spot["x"]), float(spot["y"]), float(spot["z"]))))
+	var node := MultiMeshInstance3D.new()
+	node.multimesh = multi
+	node.material_override = _card_material(kind)
+	node.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	node.visibility_range_begin = 165.0
+	node.visibility_range_begin_margin = 28.0
+	node.visibility_range_end = 255.0
+	node.visibility_range_end_margin = 24.0
+	node.visibility_range_fade_mode = GeometryInstance3D.VISIBILITY_RANGE_FADE_SELF
+	add_child(node)
+
+
+func _cached_tree_mesh(kind: int, variant: int) -> ArrayMesh:
+	var key := kind * 2 + variant
+	if _mesh_cache.has(key):
+		return _mesh_cache[key]
+	var mesh := _tree_mesh(kind, variant)
+	_mesh_cache[key] = mesh
+	return mesh
+
+
+func _tree_mesh(kind: int, variant: int) -> ArrayMesh:
+	var tool := SurfaceTool.new()
+	tool.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var jitter := 0.08 if variant == 1 else 0.0
+	if kind == 0:
+		_mesh_spruce(tool, jitter)
+	elif kind == 1:
+		_mesh_pine(tool, jitter)
+	elif kind == 2:
+		_mesh_oak(tool, jitter)
+	elif kind == 3:
+		_mesh_birch(tool, jitter)
+	else:
+		_mesh_bush(tool, jitter)
+	tool.generate_normals()
+	return tool.commit()
+
+
+func _mesh_spruce(tool: SurfaceTool, jitter: float) -> void:
+	var bark := Color(0.32, 0.2, 0.11)
+	var greens := [Color(0.08, 0.28, 0.11), Color(0.11, 0.34, 0.13), Color(0.09, 0.3, 0.12), Color(0.15, 0.38, 0.15)]
+	_add_cylinder(tool, Vector3.ZERO, Vector3.UP, 0.2, 0.1, 2.2, bark, 6)
 	for i in 4:
-		var cone := MeshInstance3D.new()
-		var mesh := CylinderMesh.new()
-		mesh.top_radius = 0.05
-		mesh.bottom_radius = 2.15 - float(i) * 0.42
-		mesh.height = 2.0
-		cone.mesh = mesh
-		cone.position = Vector3(0.15 * float(i % 2), 2.1 + float(i) * 1.25, -0.1 * float(i % 2))
-		cone.material_override = _paint(greens[i % greens.size()])
-		root.add_child(cone)
+		var y := 1.35 + float(i) * 1.2 + jitter
+		_add_cylinder(tool, Vector3(jitter * 0.4, y, 0.0), Vector3.UP, 1.65 - float(i) * 0.36, 0.04, 1.55, greens[i], 7)
+	_add_cylinder(tool, Vector3(0.0, 1.7, 0.0), Vector3(0.75, 0.32, 0.15).normalized(), 0.045, 0.025, 0.7, bark, 4)
+	_add_cylinder(tool, Vector3(0.0, 2.3, 0.0), Vector3(-0.62, 0.4, 0.28).normalized(), 0.04, 0.02, 0.62, bark, 4)
 
 
-func _oak(root: Node3D) -> void:
-	_trunk(root, 0.36, 2.5, Color(0.34, 0.22, 0.12))
-	var arms := [Vector3(1.2, 2.6, 0.4), Vector3(-1.1, 2.8, 0.6), Vector3(0.3, 3.0, -1.2), Vector3(-0.4, 2.5, 1.1)]
+func _mesh_pine(tool: SurfaceTool, jitter: float) -> void:
+	var bark := Color(0.4, 0.27, 0.15)
+	var greens := [Color(0.16, 0.38, 0.14), Color(0.2, 0.44, 0.16), Color(0.12, 0.34, 0.12)]
+	_add_cylinder(tool, Vector3.ZERO, Vector3.UP, 0.22, 0.1, 3.3, bark, 6)
+	for i in 3:
+		var y := 2.4 + float(i) * 1.3 + jitter
+		_add_cylinder(tool, Vector3(0.0, y, 0.0), Vector3.UP, 1.85 - float(i) * 0.4, 0.05, 1.75, greens[i], 7)
+	_add_cylinder(tool, Vector3(0.0, 2.5, 0.0), Vector3(0.82, 0.28, 0.12).normalized(), 0.05, 0.028, 0.85, bark, 4)
+	_add_cylinder(tool, Vector3(0.0, 3.05, 0.0), Vector3(-0.55, 0.42, 0.45).normalized(), 0.04, 0.022, 0.7, bark, 4)
+
+
+func _mesh_oak(tool: SurfaceTool, jitter: float) -> void:
+	var bark := Color(0.36, 0.23, 0.12)
+	var leaf := Color(0.16, 0.42, 0.15).lerp(Color(0.26, 0.5, 0.18), jitter * 3.0)
+	_add_cylinder(tool, Vector3.ZERO, Vector3.UP, 0.34, 0.2, 2.35, bark, 6)
+	var arms := [Vector3(1.1, 0.65, 0.28), Vector3(-1.0, 0.72, 0.4), Vector3(0.22, 0.8, -1.1), Vector3(-0.3, 0.5, 1.0)]
 	for arm in arms:
-		var branch := MeshInstance3D.new()
-		var mesh := CylinderMesh.new()
-		mesh.top_radius = 0.06
-		mesh.bottom_radius = 0.1
-		mesh.height = arm.length()
-		branch.mesh = mesh
-		branch.position = arm * 0.5
-		branch.basis = _along(arm.normalized())
-		branch.material_override = _paint(Color(0.36, 0.24, 0.14))
-		root.add_child(branch)
-		var clump := MeshInstance3D.new()
-		var leaf := CylinderMesh.new()
-		leaf.top_radius = 0.15
-		leaf.bottom_radius = 1.15
-		leaf.height = 1.5
-		clump.mesh = leaf
-		clump.position = arm + Vector3(0.0, 0.5, 0.0)
-		clump.material_override = _paint(Color(0.16, 0.42, 0.18))
-		root.add_child(clump)
+		var dir := arm.normalized()
+		var start := Vector3(0.0, 1.7 + jitter, 0.0)
+		_add_cylinder(tool, start, dir, 0.08, 0.04, arm.length(), bark, 5)
+		var tip := start + dir * arm.length()
+		_add_cylinder(tool, tip + Vector3(0.0, -0.15, 0.0), Vector3.UP, 0.78, 0.07, 1.25, leaf, 6)
 
 
-func _birch(root: Node3D) -> void:
-	_trunk(root, 0.14, 5.0, Color(0.82, 0.82, 0.78))
-	var crown := MeshInstance3D.new()
+func _mesh_birch(tool: SurfaceTool, jitter: float) -> void:
+	var bark := Color(0.86, 0.86, 0.8)
+	var mark := Color(0.28, 0.3, 0.26)
+	var leaf := Color(0.5, 0.66, 0.28)
+	_add_cylinder(tool, Vector3.ZERO, Vector3.UP, 0.13, 0.07, 4.5, bark, 6)
+	_add_cylinder(tool, Vector3(0.0, 1.35, 0.0), Vector3.UP, 0.14, 0.14, 0.1, mark, 5)
+	_add_cylinder(tool, Vector3(0.0, 2.55, 0.0), Vector3.UP, 0.11, 0.11, 0.08, mark, 5)
+	_add_cylinder(tool, Vector3(0.05, 3.2, 0.0), Vector3(0.7, 0.42, 0.2).normalized(), 0.035, 0.02, 0.65, bark, 4)
+	_add_cylinder(tool, Vector3(-0.05, 3.6, 0.05), Vector3(-0.45, 0.5, 0.35).normalized(), 0.03, 0.018, 0.55, bark, 4)
+	_add_cylinder(tool, Vector3(0.0, 3.7 + jitter, 0.0), Vector3.UP, 1.05, 0.06, 1.55, leaf, 6)
+	_add_cylinder(tool, Vector3(0.4, 4.15, 0.12), Vector3.UP, 0.62, 0.04, 1.05, Color(0.42, 0.58, 0.24), 5)
+
+
+func _mesh_bush(tool: SurfaceTool, jitter: float) -> void:
+	var stem := Color(0.3, 0.21, 0.12)
+	var leaf := Color(0.18, 0.4, 0.14).lerp(Color(0.28, 0.5, 0.16), jitter * 3.0)
+	for i in 4:
+		var ang := float(i) * TAU / 4.0 + jitter
+		var offset := Vector3(cos(ang) * 0.26, 0.0, sin(ang) * 0.26)
+		_add_cylinder(tool, offset, Vector3.UP, 0.04, 0.025, 0.32, stem, 4)
+		_add_cylinder(tool, offset + Vector3(0.0, 0.22, 0.0), Vector3.UP, 0.5, 0.05, 0.78, leaf, 6)
+
+
+func _add_cylinder(tool: SurfaceTool, base: Vector3, axis: Vector3, r0: float, r1: float, height: float, color: Color, sides: int) -> void:
+	if height < 0.02:
+		return
+	var y := axis.normalized()
+	var x := y.cross(Vector3.FORWARD)
+	if x.length() < 0.08:
+		x = y.cross(Vector3.RIGHT)
+	x = x.normalized()
+	var z := x.cross(y).normalized()
+	var top := base + y * height
+	for i in sides:
+		var a0 := TAU * float(i) / float(sides)
+		var a1 := TAU * float(i + 1) / float(sides)
+		var p00 := base + (x * cos(a0) + z * sin(a0)) * r0
+		var p10 := base + (x * cos(a1) + z * sin(a1)) * r0
+		var p01 := top + (x * cos(a0) + z * sin(a0)) * r1
+		var p11 := top + (x * cos(a1) + z * sin(a1)) * r1
+		_tri_c(tool, p00, p10, p11, color)
+		_tri_c(tool, p00, p11, p01, color)
+
+
+func _tri_c(tool: SurfaceTool, a: Vector3, b: Vector3, c: Vector3, color: Color) -> void:
+	tool.set_color(color)
+	tool.add_vertex(a)
+	tool.set_color(color)
+	tool.add_vertex(b)
+	tool.set_color(color)
+	tool.add_vertex(c)
+
+
+func _card_mesh(width: float, height: float) -> ArrayMesh:
+	var tool := SurfaceTool.new()
+	tool.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var half := width * 0.5
+	tool.set_uv(Vector2(0.0, 0.0))
+	tool.add_vertex(Vector3(-half, 0.0, 0.0))
+	tool.set_uv(Vector2(1.0, 0.0))
+	tool.add_vertex(Vector3(half, 0.0, 0.0))
+	tool.set_uv(Vector2(1.0, 1.0))
+	tool.add_vertex(Vector3(half, height, 0.0))
+	tool.set_uv(Vector2(0.0, 0.0))
+	tool.add_vertex(Vector3(-half, 0.0, 0.0))
+	tool.set_uv(Vector2(1.0, 1.0))
+	tool.add_vertex(Vector3(half, height, 0.0))
+	tool.set_uv(Vector2(0.0, 1.0))
+	tool.add_vertex(Vector3(-half, height, 0.0))
+	return tool.commit()
+
+
+func _card_material(kind: int) -> ShaderMaterial:
+	var mat := ShaderMaterial.new()
+	mat.shader = _card_shader()
+	var leaf := Color(0.12, 0.34, 0.12)
+	var bark := Color(0.34, 0.22, 0.12)
+	var shape := 0.0
+	if kind == 1:
+		leaf = Color(0.16, 0.4, 0.14)
+	elif kind == 2:
+		leaf = Color(0.18, 0.44, 0.15)
+		shape = 1.0
+	elif kind == 3:
+		leaf = Color(0.5, 0.66, 0.28)
+		bark = Color(0.86, 0.86, 0.8)
+		shape = 1.0
+	elif kind == 4:
+		leaf = Color(0.2, 0.42, 0.15)
+		shape = 1.0
+	mat.set_shader_parameter("leaf", Vector3(leaf.r, leaf.g, leaf.b))
+	mat.set_shader_parameter("bark", Vector3(bark.r, bark.g, bark.b))
+	mat.set_shader_parameter("shape", shape)
+	return mat
+
+
+func _card_shader() -> Shader:
+	if _card_shader_res != null:
+		return _card_shader_res
+	var shader := Shader.new()
+	shader.code = """shader_type spatial;
+render_mode unshaded, cull_disabled, depth_draw_opaque;
+uniform vec3 leaf = vec3(0.14, 0.36, 0.13);
+uniform vec3 bark = vec3(0.34, 0.22, 0.12);
+uniform float shape = 0.0;
+void vertex() {
+	vec3 scale = vec3(length(MODEL_MATRIX[0].xyz), length(MODEL_MATRIX[1].xyz), length(MODEL_MATRIX[2].xyz));
+	vec3 cam_z = normalize(INV_VIEW_MATRIX[2].xyz);
+	vec3 up = vec3(0.0, 1.0, 0.0);
+	if (abs(dot(cam_z, up)) > 0.95) {
+		up = vec3(0.0, 0.0, 1.0);
+	}
+	vec3 right = normalize(cross(up, cam_z));
+	vec3 forward = normalize(cross(right, up));
+	MODELVIEW_MATRIX = VIEW_MATRIX * mat4(
+		vec4(right * scale.x, 0.0),
+		vec4(vec3(0.0, scale.y, 0.0), 0.0),
+		vec4(forward * scale.z, 0.0),
+		MODEL_MATRIX[3]
+	);
+}
+void fragment() {
+	float trunk = step(abs(UV.x - 0.5), 0.055) * step(UV.y, 0.34);
+	float spruce = step(abs(UV.x - 0.5), (UV.y - 0.2) * 0.7) * step(0.22, UV.y);
+	vec2 q = (UV - vec2(0.5, 0.62)) * vec2(1.15, 1.05);
+	float round_crown = step(dot(q, q), 0.2);
+	float crown = mix(spruce, round_crown, step(0.5, shape));
+	if (max(trunk, crown) < 0.5) {
+		discard;
+	}
+	ALBEDO = mix(bark, leaf, crown);
+}
+"""
+	_card_shader_res = shader
+	return shader
+
+
+func _foliage_material() -> StandardMaterial3D:
+	var paint := StandardMaterial3D.new()
+	paint.vertex_color_use_as_albedo = true
+	paint.roughness = 0.9
+	paint.cull_mode = BaseMaterial3D.CULL_DISABLED
+	return paint
+
+
+func _scatter_floor(rng: RandomNumberGenerator) -> void:
+	var rocks := 0
+	var guard := 0
+	while rocks < 18 and guard < 240:
+		guard += 1
+		var x := rng.randf_range(-28.0, 60.0)
+		var z := rng.randf_range(-210.0, -46.0)
+		if sample_height(x, z) < 1.1 or _blocked_spot(x, z):
+			continue
+		_add_rock(x, z, rng.randf_range(0.45, 1.8), rng.randf() * TAU)
+		rocks += 1
+	_scatter_pebbles(rng)
+	_scatter_fallen(rng)
+	_scatter_tall_grass(rng)
+
+
+func _scatter_pebbles(rng: RandomNumberGenerator) -> void:
+	var mesh := _pebble_mesh()
+	var spots: Array[Transform3D] = []
+	var guard := 0
+	while spots.size() < 140 and guard < 700:
+		guard += 1
+		var x := rng.randf_range(-130.0, 80.0)
+		var z := rng.randf_range(-190.0, 40.0)
+		if _blocked_spot(x, z) or _pond_field(x, z) > 0.05:
+			continue
+		var cut := pow(1.0 - absf(valley_noise.get_noise_2d(x, z)), 4.0)
+		if cut < 0.35 and sample_height(x, z) < 1.4 and not in_grove(Vector3(x, 0.0, z)):
+			continue
+		var y := sample_height(x, z)
+		var basis := Basis(Vector3.UP, rng.randf() * TAU).scaled(Vector3.ONE * rng.randf_range(0.35, 0.95))
+		spots.append(Transform3D(basis, Vector3(x, y, z)))
+	if spots.is_empty():
+		return
+	var multi := MultiMesh.new()
+	multi.transform_format = MultiMesh.TRANSFORM_3D
+	multi.mesh = mesh
+	multi.instance_count = spots.size()
+	for i in spots.size():
+		multi.set_instance_transform(i, spots[i])
+	var node := MultiMeshInstance3D.new()
+	node.multimesh = multi
+	node.material_override = _foliage_material()
+	node.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	node.visibility_range_end = 80.0
+	add_child(node)
+
+
+func _pebble_mesh() -> ArrayMesh:
+	var tool := SurfaceTool.new()
+	tool.begin(Mesh.PRIMITIVE_TRIANGLES)
+	_add_cylinder(tool, Vector3.ZERO, Vector3.UP, 0.34, 0.1, 0.26, Color(0.5, 0.47, 0.42), 5)
+	_add_cylinder(tool, Vector3(0.16, 0.0, 0.06), Vector3.UP, 0.2, 0.07, 0.16, Color(0.44, 0.42, 0.38), 5)
+	tool.generate_normals()
+	return tool.commit()
+
+
+func _scatter_fallen(rng: RandomNumberGenerator) -> void:
+	var logs := [
+		Vector3(-64.0, 14.0, 0.4),
+		Vector3(-104.0, 8.0, 1.1),
+		Vector3(-90.0, 32.0, 2.2),
+		Vector3(-118.0, 24.0, 0.7),
+		Vector3(-72.0, -4.0, 1.8),
+		Vector3(24.0, -150.0, 0.5),
+		Vector3(-34.0, -32.0, 2.6),
+	]
+	for log in logs:
+		if _blocked_spot(log.x, log.y) or _pond_field(log.x, log.y) > 0.05:
+			continue
+		_add_fallen(log.x, log.y, log.z, rng.randf_range(2.8, 4.2))
+
+
+func _add_fallen(x: float, z: float, yaw: float, length: float) -> void:
+	var y := sample_height(x, z)
+	var root := Node3D.new()
+	root.position = Vector3(x, y, z)
+	root.rotation.y = yaw
+	add_child(root)
+	var log := MeshInstance3D.new()
 	var mesh := CylinderMesh.new()
-	mesh.top_radius = 0.08
-	mesh.bottom_radius = 1.35
-	mesh.height = 2.2
-	crown.mesh = mesh
-	crown.position = Vector3(0.0, 5.4, 0.0)
-	crown.material_override = _paint(Color(0.45, 0.62, 0.28))
-	root.add_child(crown)
-	var side := MeshInstance3D.new()
-	var side_mesh := CylinderMesh.new()
-	side_mesh.top_radius = 0.05
-	side_mesh.bottom_radius = 0.7
-	side_mesh.height = 1.3
-	side.mesh = side_mesh
-	side.position = Vector3(0.55, 4.6, 0.2)
-	side.material_override = _paint(Color(0.38, 0.55, 0.24))
-	root.add_child(side)
+	mesh.top_radius = 0.18
+	mesh.bottom_radius = 0.26
+	mesh.height = length
+	log.mesh = mesh
+	log.rotation_degrees = Vector3(0.0, 0.0, 90.0)
+	log.position = Vector3(0.0, 0.26, 0.0)
+	log.material_override = _paint(Color(0.34, 0.24, 0.14))
+	log.visibility_range_end = 160.0
+	root.add_child(log)
+	var stub := MeshInstance3D.new()
+	var stub_mesh := CylinderMesh.new()
+	stub_mesh.top_radius = 0.04
+	stub_mesh.bottom_radius = 0.07
+	stub_mesh.height = 0.7
+	stub.mesh = stub_mesh
+	stub.position = Vector3(length * 0.2, 0.45, 0.05)
+	stub.rotation_degrees = Vector3(18.0, 0.0, 28.0)
+	stub.material_override = _paint(Color(0.3, 0.22, 0.12))
+	root.add_child(stub)
+	# Несколько столбов вдоль той же оси, что и картинка. Так поворот не разъедется с ударом.
+	var axis := root.global_transform.basis.x
+	axis.y = 0.0
+	if axis.length() < 0.01:
+		axis = Vector3(1.0, 0.0, 0.0)
+	axis = axis.normalized()
+	var note := "Столкновение с поваленным стволом. Перелетите или облетите."
+	for i in 5:
+		var t := (float(i) / 4.0 - 0.5) * length
+		var point := Vector3(x, 0.0, z) + axis * t
+		_add_solid(point.x, point.z, 0.36, 0.7, note)
+
+
+func _scatter_tall_grass(rng: RandomNumberGenerator) -> void:
+	var mesh := _tall_grass_mesh()
+	var spots: Array[Transform3D] = []
+	var colors: Array[Color] = []
+	var guard := 0
+	while spots.size() < 1600 and guard < 5000:
+		guard += 1
+		var x := rng.randf_range(-140.0, 40.0)
+		var z := rng.randf_range(-50.0, 55.0)
+		if _blocked_spot(x, z) or _on_course(x, z) or _pond_field(x, z) > 0.08:
+			continue
+		if sample_height(x, z) > 3.5:
+			continue
+		var near_grove := in_grove(Vector3(x, 0.0, z)) or Vector2(x + 90.0, z - 16.0).length() < 58.0
+		if not near_grove and rng.randf() > 0.25:
+			continue
+		var y := sample_height(x, z)
+		var basis := Basis(Vector3.UP, rng.randf() * TAU).scaled(Vector3.ONE * rng.randf_range(0.75, 1.35))
+		spots.append(Transform3D(basis, Vector3(x, y, z)))
+		colors.append(Color(0.7 + rng.randf() * 0.35, 0.85 + rng.randf() * 0.15, 0.65))
+	if spots.is_empty():
+		return
+	var multi := MultiMesh.new()
+	multi.transform_format = MultiMesh.TRANSFORM_3D
+	multi.use_colors = true
+	multi.mesh = mesh
+	multi.instance_count = spots.size()
+	for i in spots.size():
+		multi.set_instance_transform(i, spots[i])
+		multi.set_instance_color(i, colors[i])
+	var node := MultiMeshInstance3D.new()
+	node.multimesh = multi
+	var paint := _paint(Color(0.2, 0.44, 0.16))
+	paint.vertex_color_use_as_albedo = true
+	node.material_override = paint
+	node.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	node.visibility_range_end = 58.0
+	add_child(node)
+
+
+func _tall_grass_mesh() -> ArrayMesh:
+	var tool := SurfaceTool.new()
+	tool.begin(Mesh.PRIMITIVE_TRIANGLES)
+	_grass_blade(tool, 0.0, 0.9)
+	_grass_blade(tool, PI * 0.5, 0.75)
+	tool.generate_normals()
+	return tool.commit()
+
+
+func _grass_blade(tool: SurfaceTool, yaw: float, height: float) -> void:
+	var c := cos(yaw)
+	var s := sin(yaw)
+	var a := Vector3(-0.05 * c, 0.0, -0.05 * s)
+	var b := Vector3(0.05 * c, 0.0, 0.05 * s)
+	_tri(tool, a, b, Vector3(0.0, height, 0.0))
 
 
 func _add_bush(x: float, z: float, size: float) -> void:
@@ -780,16 +1184,20 @@ func _build_grass() -> void:
 		if sample_height(x, z) > 4.5:
 			continue
 		spots.append(Vector3(x, sample_height(x, z), z))
+	multi.use_colors = true
 	multi.instance_count = spots.size()
 	for i in spots.size():
 		var spot := spots[i]
 		var basis := Basis(Vector3.UP, rng.randf_range(0.0, TAU)).scaled(Vector3.ONE * rng.randf_range(0.7, 1.3))
 		multi.set_instance_transform(i, Transform3D(basis, spot))
+		multi.set_instance_color(i, Color(0.72 + rng.randf() * 0.35, 0.9, 0.7))
 	var grass := MultiMeshInstance3D.new()
 	grass.multimesh = multi
 	grass.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	grass.visibility_range_end = 75.0
-	grass.material_override = _paint(Color(0.22, 0.46, 0.18))
+	var grass_paint := _paint(Color(0.22, 0.46, 0.18))
+	grass_paint.vertex_color_use_as_albedo = true
+	grass.material_override = grass_paint
 	add_child(grass)
 
 

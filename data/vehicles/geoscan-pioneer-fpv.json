@@ -87,6 +87,12 @@
     "source": "https://download.geoscan.ru/pioneer/upload/Docs/Geoscan-Pioneer-FPV-characteristics.pdf?v3",
     "comment": "Максимальная продолжительность полёта 8 мин."
   },
+  "camera_fov_deg": {
+    "value": 120,
+    "origin": "assumption",
+    "source": "",
+    "comment": "В открытых карточке и PDF угла обзора нет. 120° — условный широкий угол FPV-камеры для конуса, не паспорт и не тяга."
+  },
   "drag": {
     "cd": {
       "value": 1.0,

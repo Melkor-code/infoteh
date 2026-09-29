@@ -4,6 +4,7 @@ const VehicleLibrary = preload("res://scripts/vehicle_library.gd")
 const Quadrotor = preload("res://scripts/quadrotor.gd")
 const FlightModel = preload("res://scripts/flight_model.gd")
 const RangeField = preload("res://scripts/range_field.gd")
+const FlightOverlay = preload("res://scripts/flight_overlay.gd")
 
 const TERRAIN_POLYGON := 0
 const TERRAIN_SLOPE := 1
@@ -26,6 +27,11 @@ var turbulence_on := false
 var camera_mode := 0
 var craft: Quadrotor
 var camera: Camera3D
+var overlay
+var show_sensors := false
+var show_aero := false
+var sensor_button: Button
+var aero_button: Button
 var rain: GPUParticles3D
 var snow: GPUParticles3D
 var hail: GPUParticles3D
@@ -134,6 +140,10 @@ func _process(_delta: float) -> void:
 	if camera == null:
 		return
 	_place_camera()
+	if overlay != null and is_instance_valid(overlay):
+		# Из кабины конус не рисуем: он начинается в объективе и зальёт весь кадр.
+		overlay.set("sensors_on", show_sensors and camera_mode != 1)
+		overlay.set("aero_on", show_aero)
 	if status_flash_time > 0.0:
 		status_flash_time -= _delta
 		if status_flash_time <= 0.0:
@@ -162,6 +172,10 @@ func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventKey and event.pressed and not event.echo:
 		if event.keycode == KEY_C:
 			camera_mode = (camera_mode + 1) % 3
+		elif event.keycode == KEY_V:
+			_toggle_sensors()
+		elif event.keycode == KEY_B:
+			_toggle_aero()
 		elif event.keycode == KEY_ESCAPE and flying:
 			_back_to_menu()
 
@@ -171,24 +185,28 @@ func _build_world() -> void:
 	var environment := Environment.new()
 	var sky := Sky.new()
 	var sky_mat := ProceduralSkyMaterial.new()
-	sky_mat.sky_top_color = Color(0.28, 0.48, 0.82)
-	sky_mat.sky_horizon_color = Color(0.72, 0.8, 0.88)
-	sky_mat.ground_bottom_color = Color(0.2, 0.28, 0.16)
-	sky_mat.ground_horizon_color = Color(0.5, 0.54, 0.42)
-	sky_mat.sky_curve = 0.12
+	sky_mat.sky_top_color = Color(0.16, 0.36, 0.74)
+	sky_mat.sky_horizon_color = Color(0.66, 0.8, 0.94)
+	sky_mat.ground_bottom_color = Color(0.16, 0.24, 0.14)
+	sky_mat.ground_horizon_color = Color(0.48, 0.58, 0.52)
+	sky_mat.sky_curve = 0.2
 	sky_mat.sun_angle_max = 26.0
 	sky.sky_material = sky_mat
 	environment.sky = sky
 	environment.background_mode = Environment.BG_SKY
-	environment.ambient_light_source = Environment.AMBIENT_SOURCE_SKY
-	environment.ambient_light_energy = 0.7
+	# Холодный заполняющий свет, чтобы тень была синей, а не чёрной. Это не SSAO.
+	environment.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
+	environment.ambient_light_color = Color(0.5, 0.62, 0.8)
+	environment.ambient_light_energy = 0.48
+	environment.ambient_light_sky_contribution = 0.55
 	environment.tonemap_mode = Environment.TONE_MAPPER_FILMIC
 	# Обычный туман даёт глубину в Compatibility. Объёмный туман и SSAO этот рендер не рисует.
 	environment.fog_enabled = true
 	environment.fog_mode = Environment.FOG_MODE_EXPONENTIAL
-	environment.fog_density = 0.0016
-	environment.fog_light_color = Color(0.72, 0.78, 0.84)
-	environment.fog_sun_scatter = 0.12
+	environment.fog_density = 0.0015
+	environment.fog_light_color = Color(0.55, 0.7, 0.88)
+	environment.fog_aerial_perspective = 0.4
+	environment.fog_sun_scatter = 0.18
 	environment.glow_enabled = true
 	environment.glow_intensity = 0.25
 	environment.glow_strength = 0.45
@@ -198,11 +216,14 @@ func _build_world() -> void:
 
 	var sun := DirectionalLight3D.new()
 	sun.rotation_degrees = Vector3(-42, 32, 0)
-	sun.light_energy = 1.15
+	sun.light_color = Color(1.0, 0.95, 0.86)
+	sun.light_energy = 1.28
 	sun.shadow_enabled = true
-	sun.shadow_blur = 1.4
+	sun.shadow_blur = 2.0
+	sun.light_angular_distance = 0.55
 	sun.directional_shadow_mode = DirectionalLight3D.SHADOW_PARALLEL_2_SPLITS
-	sun.directional_shadow_max_distance = 150.0
+	sun.directional_shadow_blend_splits = true
+	sun.directional_shadow_max_distance = 140.0
 	add_child(sun)
 
 	field = RangeField.new()
@@ -274,7 +295,7 @@ func _build_ui() -> void:
 	start.focus_mode = Control.FOCUS_NONE
 	start.pressed.connect(_start_flight)
 	outer.add_child(start)
-	status_label = _hint("Shift поднимает, Ctrl снижает. Левая кнопка мыши наклоняет аппарат. Правая крутит камеру.")
+	status_label = _hint("Shift поднимает, Ctrl снижает. V — конус камеры, B — стрелки скорости и ветра. Оба выключены, пока не нажмёте: так они не закрывают аппарат.")
 	outer.add_child(status_label)
 	_apply_terrain()
 
@@ -322,6 +343,13 @@ func _build_ui() -> void:
 	telemetry_row.add_child(_pair("моторы", "mot", 40.0))
 	telemetry_row.add_child(_pair("сигнал", "sig", 40.0))
 	telemetry_row.add_child(_pair("порывы", "gust", 36.0))
+	sensor_button = _toggle_button("Камера", "Конус камеры. Клавиша V")
+	sensor_button.pressed.connect(_toggle_sensors)
+	telemetry_row.add_child(sensor_button)
+	aero_button = _toggle_button("Векторы", "Скорость и ветер от центра аппарата. Клавиша B")
+	aero_button.pressed.connect(_toggle_aero)
+	telemetry_row.add_child(aero_button)
+	_paint_toggles()
 	warning_label = Label.new()
 	warning_label.position = Vector2(16, 108)
 	warning_label.size = Vector2(1100, 24)
@@ -341,6 +369,9 @@ func _select(index: int) -> void:
 	var drag_scale := float(model.get("drag_scale", 1.0))
 	lines.append("Сопротивление подогнано под паспортную скорость, множитель к площади: %.1f." % drag_scale)
 	lines.append("Форму корпуса не считаем. Тяга моторов в паспорте не указана: взяли запас в 2 веса.")
+	var fov_node: Variant = profile.get("camera_fov_deg", {})
+	if FlightModel.read_number(fov_node, -1.0) > 0.0:
+		lines.append("Угол камеры: " + _tagged_number(fov_node, "%.0f", "°") + ". На тягу не влияет, только на конус.")
 	detail_label.text = "\n".join(lines)
 	for i in list_box.get_child_count():
 		var button := list_box.get_child(i) as Button
@@ -360,6 +391,9 @@ func _start_flight() -> void:
 	var spot := _start_spot()
 	var clearance := maxf(float(craft.model.get("height", 0.1)) * 0.5, 0.04)
 	craft.position = Vector3(spot.x, field.sample_height(spot.x, spot.z) + clearance + 0.04, spot.z)
+	overlay = FlightOverlay.new()
+	craft.add_child(overlay)
+	overlay.call("setup")
 	craft.target_altitude = craft.position.y
 	craft.motor_temp = air_temp
 	craft.air_temp = air_temp
@@ -391,6 +425,7 @@ func _start_flight() -> void:
 
 func _back_to_menu() -> void:
 	flying = false
+	overlay = null
 	if craft != null:
 		craft.queue_free()
 		craft = null
@@ -952,6 +987,33 @@ func _refresh_wind_labels() -> void:
 	for slider in wind_sliders:
 		if absf(slider.value - wind_speed) > 0.01:
 			slider.set_value_no_signal(wind_speed)
+
+
+func _toggle_button(text: String, tip: String) -> Button:
+	var button := Button.new()
+	button.text = text
+	button.tooltip_text = tip
+	button.focus_mode = Control.FOCUS_NONE
+	button.custom_minimum_size = Vector2(72, 22)
+	button.add_theme_font_size_override("font_size", 13)
+	return button
+
+
+func _toggle_sensors() -> void:
+	show_sensors = not show_sensors
+	_paint_toggles()
+
+
+func _toggle_aero() -> void:
+	show_aero = not show_aero
+	_paint_toggles()
+
+
+func _paint_toggles() -> void:
+	if sensor_button != null:
+		sensor_button.modulate = Color(0.65, 1.0, 0.72) if show_sensors else Color(0.72, 0.74, 0.76)
+	if aero_button != null:
+		aero_button.modulate = Color(0.7, 0.86, 1.0) if show_aero else Color(0.72, 0.74, 0.76)
 
 
 func _heading_name(forward: Vector3) -> String:

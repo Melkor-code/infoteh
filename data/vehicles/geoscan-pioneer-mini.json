@@ -79,6 +79,12 @@
     "source": "https://download.geoscan.ru/pioneer/upload/Docs/Pioneer_Mini_tech_spec.pdf",
     "comment": "Максимальная продолжительность полёта 10 мин. Это паспортный потолок, не обещание симулятора."
   },
+  "camera_fov_deg": {
+    "value": 66,
+    "origin": "assumption",
+    "source": "",
+    "comment": "В открытом PDF угла обзора нет. 66° — условный угол для конуса камеры, не паспорт и не тяга."
+  },
   "drag": {
     "cd": {
       "value": 1.0,

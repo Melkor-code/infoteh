@@ -1,11 +1,11 @@
 extends Node3D
 
 const FlightModel = preload("res://scripts/flight_model.gd")
+const ProcTree = preload("res://scripts/proc_tree.gd")
 
 ## Полигон собирается здесь, не в чужом симуляторе.
 ## Высота земли и картинка — одна функция: иначе аппарат садится сквозь холм.
-## Готовые CC0-модели с сайтов авторов отсюда не скачались, поэтому деревья и
-## камни собраны сетками в коде. Это не палки с одним шаром и не конус-горка.
+## Деревья растут правилом развилки в proc_tree.gd, не стопкой конусов и не чужим плагином.
 ## Препятствия твёрдые: ствол, камень, обод кольца, балка, стенка трубы, столб.
 
 const SPAN := 560.0
@@ -28,6 +28,10 @@ var relief_noise := FastNoiseLite.new()
 var valley_noise := FastNoiseLite.new()
 var forest_noise := FastNoiseLite.new()
 var _mesh_cache: Dictionary = {}
+var _spec_cache: Dictionary = {}
+var _tree_mats: Dictionary = {}
+var _grass_mats: Dictionary = {}
+var _grass_shader_res: Shader
 var _card_shader_res: Shader
 var _fpv_cache := PackedVector3Array()
 
@@ -231,7 +235,8 @@ func _ground_material() -> ShaderMaterial:
 	var shader := Shader.new()
 	shader.code = """shader_type spatial;
 render_mode diffuse_burley, specular_schlick_ggx;
-uniform sampler2D detail : repeat_enable;
+uniform sampler2D detail : repeat_enable, filter_linear_mipmap;
+uniform sampler2D grass_tex : repeat_enable, filter_linear_mipmap, source_color;
 varying vec3 world_normal;
 varying float height_m;
 void vertex() {
@@ -247,6 +252,12 @@ void fragment() {
 	float snow_mix = smoothstep(7.2, 9.2, height_m) * smoothstep(0.5, 0.88, slope);
 	albedo = mix(albedo, snow, snow_mix);
 	albedo *= 0.88 + 0.2 * grain;
+	// С высоты виден ковёр, не отдельные палочки. Рисунок травинок лежит на земле.
+	float meadow = smoothstep(0.02, 0.1, COLOR.g - COLOR.r) * smoothstep(0.62, 0.86, slope);
+	vec3 blades_near = texture(grass_tex, UV * 9.0).rgb;
+	vec3 blades_far = texture(grass_tex, UV * 3.4 + vec2(0.31, 0.17)).rgb;
+	vec3 blades = mix(blades_near, blades_far, 0.4) * vec3(1.55, 1.7, 1.25);
+	albedo = mix(albedo, mix(albedo, blades, 0.78), meadow);
 	ALBEDO = albedo;
 	ROUGHNESS = mix(0.94, 0.58, snow_mix);
 }
@@ -264,6 +275,7 @@ void fragment() {
 	var mat := ShaderMaterial.new()
 	mat.shader = shader
 	mat.set_shader_parameter("detail", tex)
+	mat.set_shader_parameter("grass_tex", load("res://textures/grass_top.png"))
 	return mat
 
 
@@ -574,17 +586,13 @@ func _cluster_kind(cluster: Vector3, rng: RandomNumberGenerator) -> int:
 
 
 func _tree_spec(kind: int) -> Dictionary:
-	match kind:
-		0:
-			return {"trunk_r": 0.2, "trunk_h": 2.2, "reach": 3.1, "base": 1.2, "top": 7.2}
-		1:
-			return {"trunk_r": 0.22, "trunk_h": 3.2, "reach": 3.3, "base": 2.0, "top": 7.6}
-		2:
-			return {"trunk_r": 0.34, "trunk_h": 2.5, "reach": 3.4, "base": 1.6, "top": 6.0}
-		3:
-			return {"trunk_r": 0.14, "trunk_h": 4.4, "reach": 2.6, "base": 2.8, "top": 6.6}
-		_:
-			return {"trunk_r": 0.45, "trunk_h": 1.05, "reach": 1.35, "base": 0.2, "top": 1.4}
+	# Границы кроны берутся из той же развилки, что и сетка. Иначе сопротивление
+	# сидит на старом конусе, а листва уже в другом месте.
+	if _spec_cache.has(kind):
+		return _spec_cache[kind]
+	var spec := ProcTree.envelope(kind)
+	_spec_cache[kind] = spec
+	return spec
 
 
 func _remember_tree(spots: Array[Dictionary], x: float, z: float, kind: int, size: float, yaw: float, variant: int) -> void:
@@ -615,7 +623,6 @@ func _remember_tree(spots: Array[Dictionary], x: float, z: float, kind: int, siz
 func _flush_cluster(spots: Array[Dictionary]) -> void:
 	if spots.is_empty():
 		return
-	var paint := _foliage_material()
 	for kind in 5:
 		for variant in 2:
 			var subset: Array[Dictionary] = []
@@ -634,7 +641,7 @@ func _flush_cluster(spots: Array[Dictionary]) -> void:
 				multi.set_instance_transform(i, Transform3D(basis, Vector3(float(spot["x"]), float(spot["y"]), float(spot["z"]))))
 			var node := MultiMeshInstance3D.new()
 			node.multimesh = multi
-			node.material_override = paint
+			node.material_override = _tree_material(kind)
 			# Дальше 200 м куртина гаснет и остаётся карточка, не полная сетка.
 			node.visibility_range_end = 200.0
 			node.visibility_range_end_margin = 36.0
@@ -650,8 +657,8 @@ func _add_kind_cards(spots: Array[Dictionary], kind: int) -> void:
 			subset.append(spot)
 	if subset.is_empty():
 		return
-	var wide := 1.5 if kind == 4 else 2.7
-	var tall := 1.3 if kind == 4 else 6.4
+	var wide := 1.5 if kind == 4 else 3.2
+	var tall := 1.35 if kind == 4 else 7.1
 	var multi := MultiMesh.new()
 	multi.transform_format = MultiMesh.TRANSFORM_3D
 	multi.mesh = _card_mesh(wide, tall)
@@ -683,79 +690,40 @@ func _cached_tree_mesh(kind: int, variant: int) -> ArrayMesh:
 
 
 func _tree_mesh(kind: int, variant: int) -> ArrayMesh:
-	var tool := SurfaceTool.new()
-	tool.begin(Mesh.PRIMITIVE_TRIANGLES)
-	var jitter := 0.08 if variant == 1 else 0.0
-	if kind == 0:
-		_mesh_spruce(tool, jitter)
-	elif kind == 1:
-		_mesh_pine(tool, jitter)
-	elif kind == 2:
-		_mesh_oak(tool, jitter)
-	elif kind == 3:
-		_mesh_birch(tool, jitter)
-	else:
-		_mesh_bush(tool, jitter)
-	tool.generate_normals()
-	return tool.commit()
+	return ProcTree.build(kind, variant)
 
 
-func _mesh_spruce(tool: SurfaceTool, jitter: float) -> void:
-	var bark := Color(0.32, 0.2, 0.11)
-	var greens := [Color(0.08, 0.28, 0.11), Color(0.11, 0.34, 0.13), Color(0.09, 0.3, 0.12), Color(0.15, 0.38, 0.15)]
-	_add_cylinder(tool, Vector3.ZERO, Vector3.UP, 0.2, 0.1, 2.2, bark, 6)
-	for i in 4:
-		var y := 1.35 + float(i) * 1.2 + jitter
-		_add_cylinder(tool, Vector3(jitter * 0.4, y, 0.0), Vector3.UP, 1.65 - float(i) * 0.36, 0.04, 1.55, greens[i], 7)
-	_add_cylinder(tool, Vector3(0.0, 1.7, 0.0), Vector3(0.75, 0.32, 0.15).normalized(), 0.045, 0.025, 0.7, bark, 4)
-	_add_cylinder(tool, Vector3(0.0, 2.3, 0.0), Vector3(-0.62, 0.4, 0.28).normalized(), 0.04, 0.02, 0.62, bark, 4)
+func _tree_material(kind: int) -> ShaderMaterial:
+	if _tree_mats.has(kind):
+		return _tree_mats[kind]
+	var mat := ProcTree.material(kind)
+	_tree_mats[kind] = mat
+	return mat
 
 
-func _mesh_pine(tool: SurfaceTool, jitter: float) -> void:
-	var bark := Color(0.4, 0.27, 0.15)
-	var greens := [Color(0.16, 0.38, 0.14), Color(0.2, 0.44, 0.16), Color(0.12, 0.34, 0.12)]
-	_add_cylinder(tool, Vector3.ZERO, Vector3.UP, 0.22, 0.1, 3.3, bark, 6)
-	for i in 3:
-		var y := 2.4 + float(i) * 1.3 + jitter
-		_add_cylinder(tool, Vector3(0.0, y, 0.0), Vector3.UP, 1.85 - float(i) * 0.4, 0.05, 1.75, greens[i], 7)
-	_add_cylinder(tool, Vector3(0.0, 2.5, 0.0), Vector3(0.82, 0.28, 0.12).normalized(), 0.05, 0.028, 0.85, bark, 4)
-	_add_cylinder(tool, Vector3(0.0, 3.05, 0.0), Vector3(-0.55, 0.42, 0.45).normalized(), 0.04, 0.022, 0.7, bark, 4)
-
-
-func _mesh_oak(tool: SurfaceTool, jitter: float) -> void:
-	var bark := Color(0.36, 0.23, 0.12)
-	var leaf := Color(0.16, 0.42, 0.15).lerp(Color(0.26, 0.5, 0.18), jitter * 3.0)
-	_add_cylinder(tool, Vector3.ZERO, Vector3.UP, 0.34, 0.2, 2.35, bark, 6)
-	var arms: Array[Vector3] = [Vector3(1.1, 0.65, 0.28), Vector3(-1.0, 0.72, 0.4), Vector3(0.22, 0.8, -1.1), Vector3(-0.3, 0.5, 1.0)]
-	for arm in arms:
-		var dir: Vector3 = arm.normalized()
-		var start := Vector3(0.0, 1.7 + jitter, 0.0)
-		_add_cylinder(tool, start, dir, 0.08, 0.04, arm.length(), bark, 5)
-		var tip: Vector3 = start + dir * arm.length()
-		_add_cylinder(tool, tip + Vector3(0.0, -0.15, 0.0), Vector3.UP, 0.78, 0.07, 1.25, leaf, 6)
-
-
-func _mesh_birch(tool: SurfaceTool, jitter: float) -> void:
-	var bark := Color(0.86, 0.86, 0.8)
-	var mark := Color(0.28, 0.3, 0.26)
-	var leaf := Color(0.5, 0.66, 0.28)
-	_add_cylinder(tool, Vector3.ZERO, Vector3.UP, 0.13, 0.07, 4.5, bark, 6)
-	_add_cylinder(tool, Vector3(0.0, 1.35, 0.0), Vector3.UP, 0.14, 0.14, 0.1, mark, 5)
-	_add_cylinder(tool, Vector3(0.0, 2.55, 0.0), Vector3.UP, 0.11, 0.11, 0.08, mark, 5)
-	_add_cylinder(tool, Vector3(0.05, 3.2, 0.0), Vector3(0.7, 0.42, 0.2).normalized(), 0.035, 0.02, 0.65, bark, 4)
-	_add_cylinder(tool, Vector3(-0.05, 3.6, 0.05), Vector3(-0.45, 0.5, 0.35).normalized(), 0.03, 0.018, 0.55, bark, 4)
-	_add_cylinder(tool, Vector3(0.0, 3.7 + jitter, 0.0), Vector3.UP, 1.05, 0.06, 1.55, leaf, 6)
-	_add_cylinder(tool, Vector3(0.4, 4.15, 0.12), Vector3.UP, 0.62, 0.04, 1.05, Color(0.42, 0.58, 0.24), 5)
-
-
-func _mesh_bush(tool: SurfaceTool, jitter: float) -> void:
-	var stem := Color(0.3, 0.21, 0.12)
-	var leaf := Color(0.18, 0.4, 0.14).lerp(Color(0.28, 0.5, 0.16), jitter * 3.0)
-	for i in 4:
-		var ang := float(i) * TAU / 4.0 + jitter
-		var offset := Vector3(cos(ang) * 0.26, 0.0, sin(ang) * 0.26)
-		_add_cylinder(tool, offset, Vector3.UP, 0.04, 0.025, 0.32, stem, 4)
-		_add_cylinder(tool, offset + Vector3(0.0, 0.22, 0.0), Vector3.UP, 0.5, 0.05, 0.78, leaf, 6)
+func set_foliage_wind(blow: Vector3, snow: float = 0.0) -> void:
+	# Тот же вектор, что в расчёте полёта. Картинка качается, силу это не добавляет:
+	# силу ветер и так отдаёт в quadrotor.gd.
+	var flat := Vector2(blow.x, blow.z)
+	var speed := flat.length()
+	var dir := Vector3(1.0, 0.0, 0.0)
+	if speed > 0.05:
+		dir = Vector3(flat.x / speed, 0.0, flat.y / speed)
+	var sway := clampf(speed * 0.045, 0.0, 0.62)
+	var rate := clampf(0.65 + speed * 0.09, 0.65, 2.4)
+	for kind in _tree_mats:
+		var mat: ShaderMaterial = _tree_mats[kind]
+		mat.set_shader_parameter("wind_dir", dir)
+		mat.set_shader_parameter("wind_strength", sway)
+		mat.set_shader_parameter("wind_rate", rate)
+	var grass_sway := clampf(speed * 0.02, 0.0, 0.18)
+	var cover := clampf(snow, 0.0, 1.0)
+	for kind in _grass_mats:
+		var mat: ShaderMaterial = _grass_mats[kind]
+		mat.set_shader_parameter("wind_dir", dir)
+		mat.set_shader_parameter("wind_strength", grass_sway)
+		mat.set_shader_parameter("wind_rate", rate)
+		mat.set_shader_parameter("snow_amount", cover)
 
 
 func _add_cylinder(tool: SurfaceTool, base: Vector3, axis: Vector3, r0: float, r1: float, height: float, color: Color, sides: int) -> void:
@@ -1614,40 +1582,56 @@ func _far(node: GeometryInstance3D, end: float) -> void:
 	node.visibility_range_fade_mode = GeometryInstance3D.VISIBILITY_RANGE_FADE_SELF
 
 
+func _grass_spot_ok(x: float, z: float) -> bool:
+	if Vector2(x, z).length() < 13.0 or _on_course(x, z) or _pond_field(x, z) > 0.06:
+		return false
+	if _canyon_field(x, z) > 0.18 or _fpv_distance(x, z) < 4.2:
+		return false
+	var h := sample_height(x, z)
+	return h >= WATER_Y + 0.25 and h <= 4.0
+
+
 func _build_grass() -> void:
-	# Пакеты по клеткам. Иначе дальность считается от центра поля, и трава пропадает под носом.
+	# Не отдельные палочки, а ковёр: рисунок на земле плюс крупные пучки с той же текстурой.
+	# Пакеты по клеткам, иначе дальность считается от центра поля.
 	var rng := RandomNumberGenerator.new()
 	rng.seed = 23
 	var buckets: Dictionary = {}
-	var guard := 0
-	var made := 0
-	while made < 5200 and guard < 14000:
-		guard += 1
-		var x := rng.randf_range(-190.0, 200.0)
-		var z := rng.randf_range(-210.0, 250.0)
-		if Vector2(x, z).length() < 12.0 or _on_course(x, z) or _pond_field(x, z) > 0.08:
-			continue
-		if _canyon_field(x, z) > 0.2 or _fpv_distance(x, z) < 5.0:
-			continue
-		var h := sample_height(x, z)
-		if h < WATER_Y + 0.2 or h > 5.0:
-			continue
-		var kind := rng.randi_range(0, 3)
-		var key := "%d:%d:%d" % [int(floor(x / 64.0)), int(floor(z / 64.0)), kind]
-		if not buckets.has(key):
-			buckets[key] = []
-		var chunk: Array = buckets[key]
-		var scale := rng.randf_range(0.75, 1.25)
-		var basis := Basis(Vector3.UP, rng.randf() * TAU).scaled(Vector3(scale, scale, scale))
-		chunk.append(Transform3D(basis, Vector3(x, h, z)))
-		buckets[key] = chunk
-		made += 1
-	var paints: Array[Color] = [
-		Color(0.36, 0.58, 0.2),
-		Color(0.2, 0.46, 0.16),
-		Color(0.16, 0.34, 0.12),
-		Color(0.42, 0.5, 0.18),
-	]
+	var step := 1.15
+	for iz in range(int(floor(-175.0 / step)), int(ceil(210.0 / step))):
+		for ix in range(int(floor(-155.0 / step)), int(ceil(165.0 / step))):
+			var x := float(ix) * step + rng.randf_range(-0.34, 0.34)
+			var z := float(iz) * step + rng.randf_range(-0.34, 0.34)
+			if not _grass_spot_ok(x, z):
+				continue
+			var dist := Vector2(x, z).length()
+			if dist > 72.0 and rng.randf() > 0.5:
+				continue
+			if dist > 120.0 and rng.randf() > 0.22:
+				continue
+			if dist > 175.0:
+				continue
+			var kind := 1
+			if dist < 42.0:
+				kind = 0 if rng.randf() < 0.55 else 1
+			elif rng.randf() < 0.16:
+				kind = 3
+			elif rng.randf() < 0.34:
+				kind = 2
+			var key := "%d:%d:%d" % [int(floor(x / 64.0)), int(floor(z / 64.0)), kind]
+			if not buckets.has(key):
+				buckets[key] = []
+			var chunk: Array = buckets[key]
+			var scale := rng.randf_range(0.85, 1.15)
+			if kind == 0:
+				scale *= 0.72
+			elif kind == 2:
+				scale *= 1.28
+			elif kind == 3:
+				scale *= 0.9
+			var basis := Basis(Vector3.UP, rng.randf() * TAU).scaled(Vector3.ONE * scale)
+			chunk.append(Transform3D(basis, Vector3(x, sample_height(x, z) + 0.02, z)))
+			buckets[key] = chunk
 	for key in buckets:
 		var rows: Array = buckets[key]
 		if rows.is_empty():
@@ -1659,7 +1643,7 @@ func _build_grass() -> void:
 		var origin := Vector3(float(parts[0]) * 64.0 + 32.0, 0.0, float(parts[1]) * 64.0 + 32.0)
 		var multi := MultiMesh.new()
 		multi.transform_format = MultiMesh.TRANSFORM_3D
-		multi.mesh = _grass_kind_mesh(kind)
+		multi.mesh = _grass_card_mesh()
 		multi.instance_count = rows.size()
 		for i in rows.size():
 			var world := rows[i] as Transform3D
@@ -1672,10 +1656,45 @@ func _build_grass() -> void:
 		node.visibility_range_end_margin = 36.0
 		node.visibility_range_fade_mode = GeometryInstance3D.VISIBILITY_RANGE_FADE_SELF
 		node.extra_cull_margin = 6.0
-		var paint := _paint(paints[kind])
-		paint.cull_mode = BaseMaterial3D.CULL_DISABLED
-		node.material_override = paint
+		node.material_override = _grass_material(kind)
 		add_child(node)
+
+
+func _grass_card_mesh() -> ArrayMesh:
+	if _mesh_cache.has(90):
+		return _mesh_cache[90]
+	var tool := SurfaceTool.new()
+	tool.begin(Mesh.PRIMITIVE_TRIANGLES)
+	# Две наклонённые карточки. На каждой нарисован пучок, не одна палочка.
+	# Наклон нужен, чтобы сверху, с дрона, была видна плоскость текстуры.
+	_grass_card(tool, 0.0, 1.35, 0.78, 0.34)
+	_grass_card(tool, PI * 0.5, 1.15, 0.7, -0.28)
+	var mesh := tool.commit()
+	_mesh_cache[90] = mesh
+	return mesh
+
+
+func _grass_card(tool: SurfaceTool, yaw: float, width: float, height: float, lean: float) -> void:
+	var across := Vector3(cos(yaw), 0.0, sin(yaw))
+	var forward := Vector3(-sin(yaw), 0.0, cos(yaw))
+	var half := width * 0.5
+	var root_l := -across * half
+	var root_r := across * half
+	var tip_shift := Vector3.UP * height + forward * lean
+	var tip_l := -across * half * 0.78 + tip_shift
+	var tip_r := across * half * 0.78 + tip_shift
+	_grass_uv(tool, root_l, Vector2(0.0, 0.0), Color(0.0, 0.2, 0.4, 1.0))
+	_grass_uv(tool, root_r, Vector2(1.0, 0.0), Color(0.0, 0.5, 0.6, 1.0))
+	_grass_uv(tool, tip_r, Vector2(1.0, 1.0), Color(1.0, 0.5, 0.8, 1.0))
+	_grass_uv(tool, root_l, Vector2(0.0, 0.0), Color(0.0, 0.2, 0.4, 1.0))
+	_grass_uv(tool, tip_r, Vector2(1.0, 1.0), Color(1.0, 0.5, 0.8, 1.0))
+	_grass_uv(tool, tip_l, Vector2(0.0, 1.0), Color(1.0, 0.2, 0.7, 1.0))
+
+
+func _grass_uv(tool: SurfaceTool, point: Vector3, uv: Vector2, color: Color) -> void:
+	tool.set_uv(uv)
+	tool.set_color(color)
+	tool.add_vertex(point)
 
 
 func _grass_kind_mesh(kind: int) -> ArrayMesh:
@@ -1684,32 +1703,156 @@ func _grass_kind_mesh(kind: int) -> ArrayMesh:
 		return _mesh_cache[key]
 	var tool := SurfaceTool.new()
 	tool.begin(Mesh.PRIMITIVE_TRIANGLES)
+	# Четыре пучка, как четыре материала в описании: короткая, обычная, высокая, сухая.
+	# У каждой травинки свой сдвиг фазы, иначе пучок качается одной доской.
 	if kind == 0:
-		_tuft_blade(tool, 0.0, 0.42, 0.16)
-		_tuft_blade(tool, 1.1, 0.34, 0.12)
+		_tuft_blade(tool, 0.0, 0.42, 0.09, 0.15)
+		_tuft_blade(tool, 1.15, 0.34, 0.07, 0.55)
+		_tuft_blade(tool, 2.3, 0.28, 0.06, 0.82)
 	elif kind == 1:
-		_tuft_blade(tool, 0.2, 0.72, 0.1)
-		_tuft_blade(tool, 1.7, 0.58, 0.08)
+		_tuft_blade(tool, 0.2, 0.72, 0.07, 0.2)
+		_tuft_blade(tool, 1.7, 0.58, 0.06, 0.48)
+		_tuft_blade(tool, 2.8, 0.5, 0.05, 0.77)
 	elif kind == 2:
-		_tuft_blade(tool, 0.4, 1.05, 0.07)
-		_tuft_blade(tool, 1.5, 0.86, 0.06)
-		_tuft_blade(tool, 2.4, 0.7, 0.05)
+		_tuft_blade(tool, 0.4, 1.05, 0.055, 0.12)
+		_tuft_blade(tool, 1.5, 0.86, 0.048, 0.4)
+		_tuft_blade(tool, 2.4, 0.7, 0.04, 0.7)
 	else:
-		_tuft_blade(tool, 0.0, 0.5, 0.2)
-		_tuft_blade(tool, PI * 0.5, 0.46, 0.16)
-		_tuft_blade(tool, 0.8, 0.38, 0.14)
+		_tuft_blade(tool, 0.15, 0.5, 0.1, 0.3)
+		_tuft_blade(tool, 1.3, 0.42, 0.08, 0.6)
+		_tuft_blade(tool, 2.5, 0.36, 0.07, 0.9)
 	tool.generate_normals()
 	var mesh := tool.commit()
 	_mesh_cache[key] = mesh
 	return mesh
 
 
-func _tuft_blade(tool: SurfaceTool, yaw: float, height: float, half_w: float) -> void:
-	var c := cos(yaw)
-	var s := sin(yaw)
-	var a := Vector3(-half_w * c, 0.0, -half_w * s)
-	var b := Vector3(half_w * c, 0.0, half_w * s)
-	_tri(tool, a, b, Vector3(half_w * 0.2 * s, height, -half_w * 0.2 * c))
+func _grass_material(kind: int) -> ShaderMaterial:
+	if _grass_mats.has(kind):
+		return _grass_mats[kind]
+	var greens: Array[Color] = [
+		Color(0.32, 0.56, 0.18),
+		Color(0.2, 0.46, 0.15),
+		Color(0.13, 0.34, 0.11),
+		Color(0.46, 0.48, 0.18),
+	]
+	var dry: Array[Color] = [
+		Color(0.42, 0.58, 0.2),
+		Color(0.38, 0.5, 0.16),
+		Color(0.3, 0.4, 0.14),
+		Color(0.62, 0.5, 0.22),
+	]
+	var hold := 1.0
+	if kind == 0:
+		hold = 0.7
+	elif kind == 2:
+		hold = 1.2
+	elif kind == 3:
+		hold = 0.5
+	var mat := ShaderMaterial.new()
+	mat.shader = _grass_shader()
+	var base: Color = greens[kind]
+	var straw: Color = dry[kind]
+	mat.set_shader_parameter("base_color", Vector3(base.r, base.g, base.b))
+	mat.set_shader_parameter("dry_color", Vector3(straw.r, straw.g, straw.b))
+	mat.set_shader_parameter("hold", hold)
+	mat.set_shader_parameter("clump_tex", load("res://textures/grass_clump.png"))
+	_grass_mats[kind] = mat
+	return mat
+
+
+func _grass_shader() -> Shader:
+	if _grass_shader_res != null:
+		return _grass_shader_res
+	var shader := Shader.new()
+	# Три слоя ветра и снег от кончика — идея из описания пакета EmacE Art.
+	# Их шейдер сюда не копировался: у пакета своя лицензия, а нам нужен Compatibility.
+	shader.code = """shader_type spatial;
+render_mode cull_disabled, depth_draw_opaque, specular_disabled;
+uniform vec3 wind_dir = vec3(1.0, 0.0, 0.3);
+uniform float wind_strength = 0.08;
+uniform float wind_rate = 1.1;
+uniform float snow_amount = 0.0;
+uniform float hold = 1.0;
+uniform vec3 base_color = vec3(0.22, 0.46, 0.16);
+uniform vec3 dry_color = vec3(0.5, 0.46, 0.2);
+uniform sampler2D clump_tex : filter_linear, repeat_disable, source_color;
+varying vec3 world_pos;
+varying float tip_amount;
+void vertex() {
+	tip_amount = UV.y;
+	vec3 world = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
+	world_pos = world;
+	vec2 inst = MODEL_MATRIX[3].xz;
+	float clump = fract(sin(dot(inst, vec2(12.9898, 78.233))) * 43758.5453);
+	float phase = (COLOR.g + clump) * 6.28318;
+	float own = sin(TIME * wind_rate * 1.6 + phase);
+	float along = dot(world.xz, wind_dir.xz);
+	float gust = sin(TIME * wind_rate * 0.52 + along * 0.16);
+	float tremble = sin(TIME * wind_rate * 4.4 + phase * 1.7) * 0.22;
+	float bend = (own * 0.4 + gust * 0.75 + tremble) * wind_strength * hold * tip_amount;
+	vec3 side = vec3(-wind_dir.z, 0.0, wind_dir.x);
+	vec3 blow = wind_dir + side * (COLOR.b - 0.5) * 0.7;
+	vec3 local_blow = (inverse(MODEL_MATRIX) * vec4(blow * bend, 0.0)).xyz;
+	VERTEX += local_blow;
+	VERTEX.y += abs(bend) * 0.12 * tip_amount;
+}
+void fragment() {
+	float patch = sin(world_pos.x * 0.06 + world_pos.z * 0.045) * 0.5 + 0.5;
+	float band = sin(dot(world_pos.xz, wind_dir.xz) * 0.2 - TIME * wind_rate * 0.32) * 0.5 + 0.5;
+	vec4 blade = texture(clump_tex, UV);
+	if (blade.a < 0.32) {
+		discard;
+	}
+	vec3 color = blade.rgb;
+	color = mix(color, color * base_color * vec3(2.1, 2.3, 1.6), 0.28);
+	color = mix(color, color * dry_color * vec3(2.2, 1.8, 1.1), (1.0 - hold) * 0.45);
+	color = mix(color, color * vec3(1.08, 1.02, 0.72), band * 0.18);
+	float snow_line = 1.0 - snow_amount * 0.9;
+	float snow = smoothstep(snow_line - 0.18, snow_line + 0.04, tip_amount);
+	snow *= snow_amount * (0.45 + 0.55 * patch);
+	color = mix(color, vec3(0.93, 0.95, 0.97), snow);
+	if (!FRONT_FACING) {
+		NORMAL = -NORMAL;
+	}
+	ALBEDO = color;
+	ROUGHNESS = 0.92;
+}
+"""
+	_grass_shader_res = shader
+	return shader
+
+
+func _grass_tri(tool: SurfaceTool, a: Vector3, b: Vector3, c: Vector3, ca: Color, cb: Color, cc: Color) -> void:
+	tool.set_color(ca)
+	tool.add_vertex(a)
+	tool.set_color(cb)
+	tool.add_vertex(b)
+	tool.set_color(cc)
+	tool.add_vertex(c)
+
+
+func _tuft_blade(tool: SurfaceTool, yaw: float, height: float, half_w: float, phase: float) -> void:
+	# Лента из двух звеньев, не один треугольник. Красный канал — насколько точку гнёт ветер:
+	# у земли 0, на кончике 1. Зелёный — свой ритм травинки внутри пучка.
+	var across := Vector3(cos(yaw), 0.0, sin(yaw))
+	var forward := Vector3(-sin(yaw), 0.0, cos(yaw))
+	var curve := forward * height * 0.32
+	var root_l := -across * half_w
+	var root_r := across * half_w
+	var mid := Vector3(0.0, height * 0.46, 0.0) + curve * 0.4
+	var mid_l := mid - across * half_w * 0.58
+	var mid_r := mid + across * half_w * 0.58
+	var tip := Vector3(0.0, height, 0.0) + curve
+	var tip_l := tip - across * half_w * 0.1
+	var tip_r := tip + across * half_w * 0.1
+	var c0 := Color(0.0, phase, 0.42, 1.0)
+	var c1 := Color(0.4, phase, 0.6, 1.0)
+	var c2 := Color(1.0, phase, 0.82, 1.0)
+	_grass_tri(tool, root_l, root_r, mid_r, c0, c0, c1)
+	_grass_tri(tool, root_l, mid_r, mid_l, c0, c1, c1)
+	_grass_tri(tool, mid_l, mid_r, tip_r, c1, c1, c2)
+	_grass_tri(tool, mid_l, tip_r, tip_l, c1, c2, c2)
 
 
 func _grass_mesh() -> ArrayMesh:

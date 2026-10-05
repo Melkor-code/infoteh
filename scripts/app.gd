@@ -145,6 +145,9 @@ func _physics_process(delta: float) -> void:
 
 
 func _process(_delta: float) -> void:
+	if field != null:
+		var snow_cover := 0.85 if precip == 2 else 0.0
+		field.set_foliage_wind(_wind_vector() + gust, snow_cover)
 	if camera == null:
 		return
 	_place_camera()

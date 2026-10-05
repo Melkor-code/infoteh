@@ -12,3 +12,7 @@
 - DJI Phantom 4 Pro, спецификация: https://www.dji.com/support/product/phantom-4-pro
 
 Это не официальные модели производителей.
+
+Идея, как ветвится дерево, разобрана по открытому плагину gdTree3D: https://github.com/JekSun97/gdTree3D . Там обёртка над proctree (Paul Brunt, 2012; перенос на C++ — Jari Komppa, 2015). В проект не копировались ни их библиотека, ни исходник. Сетка, шейдер и карточки листвы написаны в `scripts/proc_tree.gd`.
+
+Как качается трава, разобрано по описанию пакета EmacE Art «Godot Stylized Vegetation Wind Shader»: https://store.godotengine.org/asset/emace-art/godot-stylized-vegetation-wind-shader/ . Три слоя ветра, гнётся только кончик, снег садится сверху вниз. Их файлы не скачивались и не вставлялись: у пакета своя лицензия, шейдер написан у нас.

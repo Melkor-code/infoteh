@@ -427,11 +427,11 @@ static func collision_segments(kind: int, variant: int) -> Array[Dictionary]:
 	var grown := _grow(kind, variant)
 	var result: Array[Dictionary] = []
 	var root: Dictionary = grown["root"]
-	_collect_segments(root, result)
+	_collect_segments(root, result, -1.0)
 	return result
 
 
-static func _collect_segments(branch: Dictionary, result: Array[Dictionary]) -> void:
+static func _collect_segments(branch: Dictionary, result: Array[Dictionary], parent_radius: float) -> void:
 	var a: Vector3 = branch["from"]
 	var b: Vector3 = branch["head"]
 	var delta := b - a
@@ -440,8 +440,10 @@ static func _collect_segments(branch: Dictionary, result: Array[Dictionary]) -> 
 		var direction := delta / length
 		var sink := minf(float(branch["radius"]) * 0.7, length * 0.35)
 		var start := a - direction * sink if a != Vector3.ZERO else a
-		result.append({"a": start, "b": b, "radius": maxf(float(branch["radius"]), 0.018)})
+		var end_radius := float(branch["radius"])
+		var start_radius := end_radius * 1.35 if parent_radius < 0.0 else maxf(end_radius, parent_radius * 0.42)
+		result.append({"a": start, "b": b, "radius": maxf(start_radius, 0.018)})
 	if branch["c0"] == null:
 		return
-	_collect_segments(branch["c0"], result)
-	_collect_segments(branch["c1"], result)
+	_collect_segments(branch["c0"], result, float(branch["radius"]))
+	_collect_segments(branch["c1"], result, float(branch["radius"]))

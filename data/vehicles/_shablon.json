@@ -1,0 +1,68 @@
+{
+  "id": "custom_id_latinitsey",
+  "display_name": "Название, которое увидит человек в меню",
+  "disclaimer": "Не официальная модель производителя. Числа внёс пользователь.",
+  "mass_kg": {
+    "value": null,
+    "origin": "missing",
+    "source": "",
+    "comment": "Масса в полёте, килограммы. 500 г = 0.5"
+  },
+  "dimensions_m": {
+    "width": {
+      "value": null,
+      "origin": "missing",
+      "source": "",
+      "comment": "Ширина, метры. Нужна для сопротивления."
+    },
+    "height": {
+      "value": null,
+      "origin": "missing",
+      "source": "",
+      "comment": "Высота, метры."
+    },
+    "length": {
+      "value": null,
+      "origin": "missing",
+      "source": "",
+      "comment": "Длина, метры. На сопротивление в нашей простой модели не влияет."
+    }
+  },
+  "propeller_diameter_m": {
+    "value": null,
+    "origin": "missing",
+    "source": "",
+    "comment": "Диаметр одного винта, метры."
+  },
+  "battery": {
+    "capacity_mah": { "value": null, "origin": "missing", "source": "", "comment": "" },
+    "voltage_v": { "value": null, "origin": "missing", "source": "", "comment": "" },
+    "cells": { "value": null, "origin": "missing", "source": "", "comment": "Число банок. 1S = 1, 4S = 4." }
+  },
+  "max_airspeed_m_s": {
+    "value": null,
+    "origin": "missing",
+    "source": "",
+    "comment": "Максимальная скорость относительно воздуха, м/с. 20 км/ч ≈ 5.6"
+  },
+  "max_wind_m_s": {
+    "value": null,
+    "origin": "missing",
+    "source": "",
+    "comment": "Допустимый ветер из паспорта, м/с. Если неизвестен — оставить null."
+  },
+  "drag": {
+    "cd": {
+      "value": 1.0,
+      "origin": "assumption",
+      "source": "",
+      "comment": "Коэффициент сопротивления. 1.0 — типовая открытая рама, не измерение."
+    },
+    "box_fill": {
+      "value": 0.35,
+      "origin": "assumption",
+      "source": "",
+      "comment": "Какая доля прямоугольника ширина×высота встречает воздух. Форму корпуса не описывает."
+    }
+  }
+}

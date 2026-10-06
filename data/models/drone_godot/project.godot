@@ -1,0 +1,13 @@
+config_version=5
+
+[application]
+config/name="Reference Drone"
+run/main_scene="res://demo.tscn"
+
+[display]
+window/size/viewport_width=1000
+window/size/viewport_height=750
+
+[rendering]
+renderer/rendering_method="gl_compatibility"
+renderer/rendering_method.mobile="gl_compatibility"

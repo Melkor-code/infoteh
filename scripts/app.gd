@@ -200,7 +200,7 @@ func _process(_delta: float) -> void:
 	if craft != null:
 		craft.navigation_lights.visible = lights_on and day_night.daylight < 0.5
 		# FPV получает отдельный OSD без старой верхней строки телеметрии.
-		flight_panel.visible = flying and camera_mode != 1 and not paused
+		flight_panel.visible = flying and camera_mode != 1 and not paused and not clean_screen
 	trace.visible = show_trace and flying
 	if camera == null:
 		return
@@ -458,14 +458,22 @@ func _build_ui() -> void:
 	pause_button.focus_mode = Control.FOCUS_NONE
 	pause_button.pressed.connect(_toggle_pause)
 	control_row.add_child(pause_button)
-	conditions_panel = _panel(Vector2(0, 0), Vector2(430, 330))
+	conditions_panel = _panel(Vector2(0, 0), Vector2(460, 440))
 	conditions_panel.theme = UiTheme.get_theme()
 	conditions_panel.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
-	conditions_panel.position -= conditions_panel.size * 0.5
+	conditions_panel.offset_left = -230
+	conditions_panel.offset_top = -220
+	conditions_panel.offset_right = 230
+	conditions_panel.offset_bottom = 220
 	layer.add_child(conditions_panel)
+	var settings_scroll := ScrollContainer.new()
+	settings_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	settings_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	conditions_panel.add_child(settings_scroll)
 	var conditions_box := VBoxContainer.new()
 	conditions_box.add_theme_constant_override("separation", 8)
-	conditions_panel.add_child(conditions_box)
+	conditions_box.custom_minimum_size.x = 420
+	settings_scroll.add_child(conditions_box)
 	conditions_box.add_child(_title("Настройки полёта"))
 	conditions_box.add_child(_hint("Ветер и погода применяются сразу после изменения."))
 	conditions_box.add_child(_wind_slider())
@@ -912,7 +920,10 @@ func _build_pause_panel(layer: CanvasLayer) -> void:
 	pause_panel = _panel(Vector2(0, 0), Vector2(380, 250))
 	pause_panel.theme = UiTheme.get_theme()
 	pause_panel.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
-	pause_panel.position -= pause_panel.size * 0.5
+	pause_panel.offset_left = -190
+	pause_panel.offset_top = -140
+	pause_panel.offset_right = 190
+	pause_panel.offset_bottom = 140
 	pause_panel.hide()
 	layer.add_child(pause_panel)
 	var box := VBoxContainer.new()

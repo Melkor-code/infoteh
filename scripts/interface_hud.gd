@@ -50,6 +50,12 @@ func _draw_map(rect: Rect2, s: float) -> void:
 	_text("ОСТРОВ  N ↑   |   100 м", rect.position + Vector2(12, 22) * s, int(13 * s), Color("#c8c8c4"))
 	var area := Rect2(rect.position + Vector2(12, 32) * s, Vector2(232, 135) * s)
 	draw_rect(area, Color("#132527"))
+	for x in range(1, 5):
+		var gx := area.position.x + area.size.x * float(x) / 5.0
+		draw_line(Vector2(gx, area.position.y), Vector2(gx, area.end.y), Color(0.35, 0.55, 0.56, 0.16), 1.0)
+	for y in range(1, 4):
+		var gy := area.position.y + area.size.y * float(y) / 4.0
+		draw_line(Vector2(area.position.x, gy), Vector2(area.end.x, gy), Color(0.35, 0.55, 0.56, 0.16), 1.0)
 	var island := PackedVector2Array()
 	for i in 32:
 		var a: float = TAU * i / 32.0
@@ -81,6 +87,15 @@ func _draw_map(rect: Rect2, s: float) -> void:
 	draw_circle(dot, 5, Color("#e3b54c"))
 	var d := Vector2(snapshot.forward.x, snapshot.forward.z).normalized() * 11
 	draw_line(dot, dot + d, Color.WHITE, 2)
+	var route: Array = snapshot.get("route", [])
+	if route.size() > 1:
+		var previous := area.get_center() + Vector2(float(route[0].x) / 310.0 * area.size.x * 0.42, float(route[0].z) / 210.0 * area.size.y * 0.38)
+		for i in range(1, route.size(), 3):
+			var current := area.get_center() + Vector2(float(route[i].x) / 310.0 * area.size.x * 0.42, float(route[i].z) / 210.0 * area.size.y * 0.38)
+			draw_line(previous, current, Color("#e4b84d"), 1.5 * s)
+			previous = current
+	draw_line(area.position + Vector2(8, area.size.y - 7) * s, area.position + Vector2(48, area.size.y - 7) * s, Color("#e4b84d"), 2.0 * s)
+	_text("МАРШРУТ", area.position + Vector2(52, area.size.y - 3) * s, int(8 * s), Color("#d9c98a"))
 
 func _draw_osd(view: Vector2, s: float) -> void:
 	var center := view * 0.5

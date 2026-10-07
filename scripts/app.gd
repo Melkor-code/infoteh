@@ -374,115 +374,119 @@ func _build_ui() -> void:
 	turb_box.focus_mode = Control.FOCUS_NONE
 	turb_box.toggled.connect(func(on: bool) -> void: turbulence_on = on)
 	menu_box.add_child(turb_box)
+	var menu_actions := HBoxContainer.new()
+	menu_actions.add_theme_constant_override("separation", 8)
+	outer.add_child(menu_actions)
 	var start := Button.new()
 	start.text = "Начать полёт"
+	start.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	start.focus_mode = Control.FOCUS_NONE
 	start.pressed.connect(_start_flight)
-	outer.add_child(start)
+	menu_actions.add_child(start)
+	var exit_button := Button.new()
+	exit_button.text = "Выйти"
+	exit_button.focus_mode = Control.FOCUS_NONE
+	exit_button.pressed.connect(func() -> void: get_tree().quit())
+	menu_actions.add_child(exit_button)
 	status_label = _hint("Shift / Ctrl — высота. P — автопилот после взлёта. L — бортовые огни ночью. T — траектория, F — потоки. C — камеры, B — силы, V — конус камеры.")
 	outer.add_child(status_label)
 	_apply_terrain()
 
-	flight_panel = _panel(Vector2(8, 8), Vector2(1264, 124))
+	flight_panel = _panel(Vector2(8, 8), Vector2(1264, 92))
 	flight_panel.theme = UiTheme.get_theme()
 	flight_panel.visible = false
-	var tight := flight_panel.get_theme_stylebox("panel") as StyleBoxFlat
-	if tight != null:
-		tight.content_margin_left = 8
-		tight.content_margin_right = 8
-		tight.content_margin_top = 4
-		tight.content_margin_bottom = 4
+	flight_panel.set_anchors_preset(Control.PRESET_TOP_WIDE)
+	flight_panel.offset_left = 8
+	flight_panel.offset_top = 8
+	flight_panel.offset_right = -8
+	flight_panel.offset_bottom = 100
 	layer.add_child(flight_panel)
 	var flight_box := VBoxContainer.new()
-	flight_box.add_theme_constant_override("separation", 2)
+	flight_box.add_theme_constant_override("separation", 4)
 	flight_panel.add_child(flight_box)
-	var flight_row := HBoxContainer.new()
-	flight_row.add_theme_constant_override("separation", 8)
-	flight_box.add_child(flight_row)
-	flight_row.add_child(_slot("name", 210.0))
-	flight_row.add_child(_pair("над землёй", "alt", 52.0))
-	flight_row.add_child(_pair("скорость", "spd", 68.0))
-	flight_row.add_child(_pair("нос", "nose", 32.0))
-	flight_row.add_child(_pair("тяга", "thr", 40.0))
-	var spacer := Control.new()
-	spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	flight_row.add_child(spacer)
-	flight_row.add_child(_wind_slider())
-	var back := Button.new()
-	back.text = "Меню"
-	back.focus_mode = Control.FOCUS_NONE
-	back.pressed.connect(_back_to_menu)
-	flight_row.add_child(back)
-	var save := Button.new()
-	save.text = "Отчёт"
-	save.focus_mode = Control.FOCUS_NONE
-	save.pressed.connect(_save_log)
-	flight_row.add_child(save)
-	var telemetry_row := HBoxContainer.new()
-	telemetry_row.add_theme_constant_override("separation", 8)
-	flight_box.add_child(telemetry_row)
-	telemetry_row.add_child(_pair("крен", "roll", 40.0))
-	telemetry_row.add_child(_pair("тангаж", "pitch", 40.0))
-	telemetry_row.add_child(_pair("курс", "yaw", 40.0))
-	telemetry_row.add_child(_pair("батарея", "bat", 40.0))
-	telemetry_row.add_child(_pair("моторы", "mot", 40.0))
-	telemetry_row.add_child(_pair("сигнал", "sig", 40.0))
-	telemetry_row.add_child(_pair("порывы", "gust", 36.0))
-	sensor_button = _toggle_button("Камера", "Конус камеры. Клавиша V")
-	sensor_button.pressed.connect(_toggle_sensors)
-	telemetry_row.add_child(sensor_button)
-	aero_button = _toggle_button("Скорость", "Жёлтая стрелка скорости. Клавиша B включает все стрелки сразу")
-	aero_button.pressed.connect(_toggle_aero)
-	telemetry_row.add_child(aero_button)
-	var force_row := HBoxContainer.new()
-	force_row.add_theme_constant_override("separation", 6)
-	flight_box.add_child(force_row)
-	wind_button = _toggle_button("Ветер", "Синяя стрелка ветра")
+	var feature_row := HBoxContainer.new()
+	feature_row.add_theme_constant_override("separation", 6)
+	flight_box.add_child(feature_row)
+	wind_button = _toggle_button("Ветер", "Показать направление ветра")
 	wind_button.pressed.connect(_toggle_wind)
-	force_row.add_child(wind_button)
-	thrust_button = _toggle_button("Тяга", "Зелёная стрелка тяги моторов")
+	feature_row.add_child(wind_button)
+	thrust_button = _toggle_button("Тяга", "Показать тягу моторов")
 	thrust_button.pressed.connect(_toggle_thrust)
-	force_row.add_child(thrust_button)
-	drag_button = _toggle_button("Сопр.", "Красная стрелка сопротивления")
+	feature_row.add_child(thrust_button)
+	drag_button = _toggle_button("Сопр.", "Показать сопротивление")
 	drag_button.pressed.connect(_toggle_drag)
-	force_row.add_child(drag_button)
-	autopilot_button = _toggle_button("Автопилот: ВЫКЛ [P]", "Удержание высоты, курса и позиции после взлёта")
-	autopilot_button.pressed.connect(_toggle_autopilot)
-	force_row.add_child(autopilot_button)
-	trace_button = _toggle_button("Траектория [T]", "Путь текущего полёта")
-	trace_button.pressed.connect(_toggle_trace)
-	force_row.add_child(trace_button)
-	flow_button = _toggle_button("Потоки [F]", "Относительный поток воздуха вокруг дрона")
+	feature_row.add_child(drag_button)
+	sensor_button = _toggle_button("Камера", "Показать конус камеры")
+	sensor_button.pressed.connect(_toggle_sensors)
+	feature_row.add_child(sensor_button)
+	aero_button = _toggle_button("Аэродинамика", "Показать скорость")
+	aero_button.pressed.connect(_toggle_aero)
+	feature_row.add_child(aero_button)
+	flow_button = _toggle_button("Потоки [F]", "Показать воздушные потоки")
 	flow_button.pressed.connect(_toggle_flow)
-	force_row.add_child(flow_button)
-	lights_button = _toggle_button("Огни [L]", "Ночные навигационные огни и фара")
+	feature_row.add_child(flow_button)
+	lights_button = _toggle_button("Огни [L]", "Бортовые огни")
 	lights_button.button_pressed = lights_on
 	lights_button.pressed.connect(_toggle_lights)
-	force_row.add_child(lights_button)
-	var conditions := Button.new()
-	conditions.text = "Условия"
-	conditions.focus_mode = Control.FOCUS_NONE
-	conditions.pressed.connect(func() -> void: conditions_panel.visible = not conditions_panel.visible)
-	force_row.add_child(conditions)
-	conditions_panel = _panel(Vector2(820, 165), Vector2(435, 250))
+	feature_row.add_child(lights_button)
+	var menu_button := Button.new()
+	menu_button.text = "Меню"
+	menu_button.focus_mode = Control.FOCUS_NONE
+	menu_button.pressed.connect(_back_to_menu)
+	feature_row.add_child(menu_button)
+	var report := Button.new()
+	report.text = "Отчёт"
+	report.focus_mode = Control.FOCUS_NONE
+	report.pressed.connect(_save_log)
+	feature_row.add_child(report)
+	var control_row := HBoxContainer.new()
+	control_row.add_theme_constant_override("separation", 6)
+	flight_box.add_child(control_row)
+	autopilot_button = _toggle_button("Автопилот: ВЫКЛ [P]", "Удержание высоты и курса")
+	autopilot_button.pressed.connect(_toggle_autopilot)
+	control_row.add_child(autopilot_button)
+	trace_button = _toggle_button("Траектория [T]", "Показать маршрут")
+	trace_button.pressed.connect(_toggle_trace)
+	control_row.add_child(trace_button)
+	var camera_cycle := Button.new()
+	camera_cycle.text = "Камера [C]"
+	camera_cycle.focus_mode = Control.FOCUS_NONE
+	camera_cycle.pressed.connect(_cycle_camera)
+	control_row.add_child(camera_cycle)
+	var pause_button := Button.new()
+	pause_button.text = "Пауза [ESC]"
+	pause_button.focus_mode = Control.FOCUS_NONE
+	pause_button.pressed.connect(_toggle_pause)
+	control_row.add_child(pause_button)
+	conditions_panel = _panel(Vector2(0, 0), Vector2(430, 330))
+	conditions_panel.theme = UiTheme.get_theme()
+	conditions_panel.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
+	conditions_panel.position -= conditions_panel.size * 0.5
 	layer.add_child(conditions_panel)
 	var conditions_box := VBoxContainer.new()
+	conditions_box.add_theme_constant_override("separation", 8)
 	conditions_panel.add_child(conditions_box)
+	conditions_box.add_child(_title("Настройки полёта"))
+	conditions_box.add_child(_hint("Ветер и погода применяются сразу после изменения."))
+	conditions_box.add_child(_wind_slider())
 	conditions_box.add_child(_time_controls())
 	conditions_box.add_child(_precip_picker())
+	var close_conditions := Button.new()
+	close_conditions.text = "Назад к паузе"
+	close_conditions.pressed.connect(func() -> void:
+		conditions_panel.hide()
+		pause_panel.visible = paused
+	)
+	conditions_box.add_child(close_conditions)
 	conditions_panel.hide()
-	_paint_toggles()
 	warning_label = Label.new()
-	warning_label.position = Vector2(16, 136)
-	warning_label.size = Vector2(1100, 24)
+	warning_label.visible = false
 	warning_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	warning_label.add_theme_color_override("font_color", Color(1.0, 0.86, 0.4))
 	layer.add_child(warning_label)
 	interface_hud = InterfaceHud.new()
 	interface_hud.setup(self)
 	layer.add_child(interface_hud)
 	_build_pause_panel(layer)
-
 
 func _select(index: int) -> void:
 	if library.profiles.is_empty():
@@ -491,10 +495,6 @@ func _select(index: int) -> void:
 	selected = clampi(index, 0, library.profiles.size() - 1)
 	var profile: Dictionary = library.profiles[selected]
 	var lines := library.summary_lines(profile)
-	var model: Dictionary = profile.get("_model", {})
-	var drag_scale := float(model.get("drag_scale", 1.0))
-	lines.append("Сопротивление подогнано под паспортную скорость, множитель к площади: %.1f." % drag_scale)
-	lines.append("Форму корпуса не считаем. Тяга моторов в паспорте не указана: взяли запас в 2 веса.")
 	var fov_node: Variant = profile.get("camera_fov_deg", {})
 	if FlightModel.read_number(fov_node, -1.0) > 0.0:
 		lines.append("Угол камеры: " + _tagged_number(fov_node, "%.0f", "°") + ". На тягу не влияет, только на конус.")
@@ -560,11 +560,13 @@ func _start_flight() -> void:
 	_log("Осадки: " + _precip_name())
 	menu_panel.visible = false
 	flight_panel.visible = true
+	pause_panel.hide()
 	_update_hud()
 
 
 func _back_to_menu() -> void:
 	conditions_panel.hide()
+	pause_panel.hide()
 	trace.visible = false
 	flying = false
 	paused = false
@@ -893,10 +895,17 @@ func _toggle_pause() -> void:
 		return
 	if conditions_panel != null and conditions_panel.visible:
 		conditions_panel.hide()
+		pause_panel.visible = paused
 		return
 	paused = not paused
 	pause_panel.visible = paused
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+
+
+func _cycle_camera() -> void:
+	if not flying:
+		return
+	camera_mode = (camera_mode + 1) % 4
 
 
 func _build_pause_panel(layer: CanvasLayer) -> void:

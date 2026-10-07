@@ -35,8 +35,6 @@ func _draw() -> void:
 	_draw_map(map, s)
 	if app.camera_mode == 1:
 		_draw_osd(view, s)
-	else:
-		_text("А Б Д О  /  " + str(app.craft.profile.display_name), Vector2(24, 34), 16)
 	if snapshot.warning != "":
 		_text(str(snapshot.warning), Vector2(24, left.position.y - 14), 13, Color("#f0dfb8"))
 
@@ -49,14 +47,33 @@ func _rows(rect: Rect2, title: String, rows: Array, width: float, s: float) -> v
 		_text(str(rows[i][1]), Vector2(rect.end.x - 130 * s, y), int(14 * s))
 
 func _draw_map(rect: Rect2, s: float) -> void:
-	_text("ОСТРОВ  N ↑", rect.position + Vector2(12, 22) * s, int(13 * s), Color("#c8c8c4"))
-	var area := Rect2(rect.position + Vector2(12, 32) * s, Vector2(232, 145) * s)
+	_text("ОСТРОВ  N ↑   |   100 м", rect.position + Vector2(12, 22) * s, int(13 * s), Color("#c8c8c4"))
+	var area := Rect2(rect.position + Vector2(12, 32) * s, Vector2(232, 135) * s)
 	draw_rect(area, Color("#132527"))
 	var island := PackedVector2Array()
 	for i in 32:
 		var a: float = TAU * i / 32.0
 		island.append(area.get_center() + Vector2(cos(a) * area.size.x * 0.42, sin(a) * area.size.y * 0.38))
 	draw_colored_polygon(island, Color("#566e51"))
+	# Карта показывает реальные зоны полигона, города, озера и холмов.
+	var city := Rect2(area.position + Vector2(99, 53) * s, Vector2(45, 28) * s)
+	draw_rect(city, Color("#6f7780"), true)
+	for x in range(3):
+		for y in range(2):
+			draw_rect(Rect2(city.position + Vector2(5 + x * 13, 5 + y * 10) * s, Vector2(8, 6) * s), Color("#b9c1c4"), true)
+	_text("ГОРОД", city.position + Vector2(2, -3) * s, int(9 * s), Color("#e5e8d5"))
+	var lake := area.position + Vector2(34, 24) * s
+	draw_circle(lake, 15 * s, Color("#398cb0"))
+	_text("ОЗЕРО", lake + Vector2(-13, 25) * s, int(8 * s), Color("#b9d9df"))
+	var course := Rect2(area.position + Vector2(14, 72) * s, Vector2(56, 25) * s)
+	draw_rect(course, Color("#d2b66b"), true)
+	for x in range(4):
+		draw_circle(course.position + Vector2(10 + x * 13, 12) * s, 4 * s, Color("#efe3a0"), false, 1.5 * s)
+	_text("ПОЛИГОН", course.position + Vector2(2, -3) * s, int(8 * s), Color("#f1dfae"))
+	var hills := area.position + Vector2(185, 98) * s
+	for i in range(3):
+		draw_circle(hills + Vector2(i * 10, -i * 3) * s, (13 - i) * s, Color("#777064"))
+	_text("АБДО", hills + Vector2(-8, 22) * s, int(9 * s), Color("#eee4c5"))
 	var p: Vector3 = snapshot.position
 	var dot := area.get_center() + Vector2(p.x / 310.0 * area.size.x * 0.42, p.z / 210.0 * area.size.y * 0.38)
 	var home := area.get_center() + Vector2(snapshot.home.x / 310.0 * area.size.x * 0.42, snapshot.home.z / 210.0 * area.size.y * 0.38)
@@ -76,7 +93,6 @@ func _draw_osd(view: Vector2, s: float) -> void:
 	draw_line(Vector2(center.x - 150, 58), Vector2(center.x + 150, 58), line, 1)
 	_text("%03d°" % int(snapshot.heading), center + Vector2(-18, -view.y * 0.38), int(16 * s), line)
 	_text("ALT %.1f m" % snapshot.altitude, Vector2(22, 34), int(16 * s), line)
-	_text("SPD %.1f km/h" % (snapshot.horizontal * 3.6), Vector2(22, view.y - 26), int(16 * s), line)
 	_text("BAT %.0f%%  SIG %.0f%%" % [snapshot.battery, snapshot.signal], Vector2(view.x - 205, 34), int(16 * s), line)
 
 func _text(value: String, point: Vector2, font_size: int, color: Color = Color("#ededeb")) -> void:

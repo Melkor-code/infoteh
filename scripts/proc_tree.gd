@@ -67,7 +67,7 @@ static func material(kind: int) -> ShaderMaterial:
 	mat.set_shader_parameter("leaf_color", Vector3(leaf.r, leaf.g, leaf.b))
 	mat.set_shader_parameter("mark_bands", 1.0 if kind == 3 else 0.0)
 	mat.set_shader_parameter("wind_dir", Vector3(1.0, 0.0, 0.35))
-	mat.set_shader_parameter("wind_strength", 0.2)
+	mat.set_shader_parameter("wind_strength", 0.12)
 	mat.set_shader_parameter("wind_rate", 1.15)
 	return mat
 
@@ -372,13 +372,16 @@ uniform vec3 leaf_color = vec3(0.16, 0.4, 0.14);
 uniform float mark_bands = 0.0;
 uniform float snow_amount = 0.0;
 uniform vec3 wind_dir = vec3(1.0, 0.0, 0.3);
-uniform float wind_strength = 0.2;
+uniform float wind_strength = 0.12;
 uniform float wind_rate = 1.1;
 void vertex() {
 	float influence = COLOR.r;
+	float height_lock = smoothstep(0.8, 2.2, VERTEX.y);
+	# Ствол, ветки и узлы остаются неподвижны; качаются только карточки листвы.
+	float foliage_motion = step(0.5, COLOR.g);
 	vec3 world = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
 	float along = world.x * 0.17 + world.z * 0.11;
-	float sway = sin(TIME * wind_rate + along) * wind_strength * influence;
+	float sway = sin(TIME * wind_rate + along) * min(wind_strength, 0.12) * influence * height_lock * foliage_motion;
 	world += wind_dir * sway;
 	world.y += abs(sway) * 0.1;
 	VERTEX = (inverse(MODEL_MATRIX) * vec4(world, 1.0)).xyz;

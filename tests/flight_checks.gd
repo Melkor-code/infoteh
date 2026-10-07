@@ -128,6 +128,14 @@ func run() -> void:
 	root.add_child(field)
 	field.build()
 	check(field.crowns.size() > 0 and field.solids.size() > 0, "unified map has canopy and solid contacts")
+	var indexed_branches := 0
+	var thin_branch_found := false
+	for cell in field._tree_cells.values():
+		for branch in cell:
+			indexed_branches += 1
+			thin_branch_found = thin_branch_found or float(branch["radius"]) < 0.06
+	check(field._tree_cells.size() > 0 and indexed_branches > 0, "tree branches use spatial cells")
+	check(not thin_branch_found, "thin branches are not solid")
 	for i in 2:
 		var spawn := field.spawn_point(i)
 		check(field.surface_kind(spawn) == 0, "island spawn %d is dry" % i)

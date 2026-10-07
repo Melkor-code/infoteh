@@ -15,9 +15,13 @@ const SPAWNS := [Vector3(0, 0, 0), Vector3(-108, 0, -10)]
 const LAKE_CENTERS := [Vector3(-130, 0, -118), Vector3(-153, 0, -88), Vector3(-112, 0, -96)]
 const LAKE_RADII := [37.0, 31.0, 26.0]
 const HILLS := [Vector3(87, 24, 145), Vector3(121, 37, 113), Vector3(159, 34, 84), Vector3(191, 25, 52)]
+const TREE_CELL_SIZE := 16.0
+const TREE_QUERY_RADIUS := 12.0
+const MIN_SOLID_BRANCH_RADIUS := 0.06
 
 var crowns: Array[Dictionary] = []
 var solids: Array[Dictionary] = []
+var _tree_cells: Dictionary = {}
 var _height_cache: Dictionary = {}
 var _paints: Dictionary = {}
 var _tree_mats: Array[ShaderMaterial] = []
@@ -128,7 +132,32 @@ func in_grove(pos: Vector3) -> bool:
 	return not CITY.grow(8).has_point(Vector2(pos.x, pos.z)) and not COURSE.grow(8).has_point(Vector2(pos.x, pos.z)) and island_radius(pos.x, pos.z) < 0.87 and lake_distance(pos.x, pos.z) > 14.0
 
 func resolve(pos: Vector3, vel: Vector3, radius: float, vertical_radius: float = -1.0) -> Dictionary:
-	return Contacts.resolve(solids, pos, vel, radius, vertical_radius)
+	# Статические объекты остаются в solids. Ветки ищутся только в соседних
+	# 16-метровых клетках, поэтому тысячи деревьев не перебираются каждый substep.
+	var nearby: Array[Dictionary] = []
+	var min_cell := _tree_cell(Vector2(pos.x - TREE_QUERY_RADIUS, pos.z - TREE_QUERY_RADIUS))
+	var max_cell := _tree_cell(Vector2(pos.x + TREE_QUERY_RADIUS, pos.z + TREE_QUERY_RADIUS))
+	for cz in range(min_cell.y, max_cell.y + 1):
+		for cx in range(min_cell.x, max_cell.x + 1):
+			var key := Vector2i(cx, cz)
+			if _tree_cells.has(key):
+				nearby.append_array(_tree_cells[key])
+	if nearby.is_empty():
+		return Contacts.resolve(solids, pos, vel, radius, vertical_radius)
+	var candidates: Array[Dictionary] = []
+	candidates.append_array(solids)
+	candidates.append_array(nearby)
+	return Contacts.resolve(candidates, pos, vel, radius, vertical_radius)
+
+func _tree_cell(point: Vector2) -> Vector2i:
+	return Vector2i(floori(point.x / TREE_CELL_SIZE), floori(point.y / TREE_CELL_SIZE))
+
+func _index_tree_branch(branch: Dictionary) -> void:
+	var midpoint: Vector3 = (branch["a"] as Vector3 + branch["b"] as Vector3) * 0.5
+	var key := _tree_cell(Vector2(midpoint.x, midpoint.z))
+	if not _tree_cells.has(key):
+		_tree_cells[key] = []
+	_tree_cells[key].append(branch)
 
 func support_height(pos: Vector3, clearance: float) -> float:
 	var height := sample_height(pos.x, pos.z)
@@ -405,7 +434,9 @@ func _build_nature() -> void:
 			for segment in ProcTree.collision_segments(kind, variant):
 				var a: Vector3 = segment["a"]
 				var b: Vector3 = segment["b"]
-				solids.append({"kind": "branch", "a": Vector3(px, y, pz) + tree_basis * a, "b": Vector3(px, y, pz) + tree_basis * b, "radius": float(segment["radius"]) * size, "note": "Столкновение со стволом или веткой дерева."})
+				var branch_radius := float(segment["radius"]) * size
+				if branch_radius >= MIN_SOLID_BRANCH_RADIUS:
+					_index_tree_branch({"kind": "branch", "a": Vector3(px, y, pz) + tree_basis * a, "b": Vector3(px, y, pz) + tree_basis * b, "radius": branch_radius, "note": "Столкновение со стволом или толстой веткой дерева."})
 			crowns.append({"x": px, "z": pz, "reach": float(spec.reach) * size, "base": y + float(spec.base) * size, "top": y + float(spec.top) * size})
 			var key := "%d:%d:%d:%d" % [kind, variant, floori(px / 70), floori(pz / 70)]
 			if not buckets.has(key):
@@ -464,7 +495,7 @@ func set_foliage_wind(blow: Vector3, snow: float = 0) -> void:
 	for material in _tree_mats:
 		material.set_shader_parameter("snow_amount", snow)
 		material.set_shader_parameter("wind_dir", direction)
-		material.set_shader_parameter("wind_strength", minf(speed * 0.04, 0.6))
+		material.set_shader_parameter("wind_strength", minf(speed * 0.04, 0.12))
 		material.set_shader_parameter("wind_rate", 0.7 + speed * 0.07)
 	if _grass_mat != null:
 		_grass_mat.set_shader_parameter("wind_direction_x", direction.x)

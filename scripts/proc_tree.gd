@@ -377,7 +377,7 @@ uniform float wind_rate = 1.1;
 void vertex() {
 	float influence = COLOR.r;
 	float height_lock = smoothstep(0.8, 2.2, VERTEX.y);
-	# Ствол, ветки и узлы остаются неподвижны; качаются только карточки листвы.
+	// Ствол, ветки и узлы остаются неподвижны; качаются только карточки листвы.
 	float foliage_motion = step(0.5, COLOR.g);
 	vec3 world = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
 	float along = world.x * 0.17 + world.z * 0.11;

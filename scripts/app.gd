@@ -580,6 +580,7 @@ func _place_camera() -> void:
 	var target := Vector3(0, 1, 0)
 	if craft != null:
 		target = craft.global_position
+		craft.set_body_visible(camera_mode != 1)
 	if camera_mode == 1 and craft != null:
 		camera.global_position = target + craft.global_transform.basis.y * 0.12
 		camera.global_rotation = craft.global_rotation

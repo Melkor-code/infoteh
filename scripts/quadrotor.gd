@@ -54,6 +54,7 @@ var drag_force := Vector3.ZERO
 var weight_force := Vector3.ZERO
 
 var _props: Array[Node3D] = []
+var _artwork: Node3D
 
 
 func setup(next_profile: Dictionary) -> void:
@@ -189,9 +190,15 @@ func step(delta: float) -> void:
 	elif position.y > floor_y + 0.35:
 		airborne = true
 
-	var spin := throttle * 25.0 * delta
+	# Картинка винтов. На тягу не влияет: в расчёте по-прежнему одна общая тяга.
+	var spin := 0.0
+	if motors_on:
+		spin = sqrt(maxf(throttle, 0.04)) * 95.0 * delta
 	for prop in _props:
-		prop.rotate_y(spin)
+		var sign := 1.0
+		if prop.has_meta("spin_sign"):
+			sign = float(prop.get_meta("spin_sign"))
+		prop.rotate_y(sign * spin)
 	_update_sensors(delta, air.length())
 	_update_warning(vmax, air.length())
 
@@ -277,8 +284,14 @@ func _update_warning(vmax: float, airspeed: float) -> void:
 		warning = "На склоне аппарат сползает вниз. Для взлёта удерживайте Shift."
 
 
+func set_body_visible(show_body: bool) -> void:
+	if _artwork != null:
+		_artwork.visible = show_body
+
+
 func _clear_mesh() -> void:
 	_props.clear()
+	_artwork = null
 	while get_child_count() > 0:
 		var child := get_child(0)
 		remove_child(child)
@@ -286,6 +299,103 @@ func _clear_mesh() -> void:
 
 
 func _build_mesh() -> void:
+	var holder := Node3D.new()
+	holder.name = "Body"
+	add_child(holder)
+	_artwork = holder
+	if not _attach_artwork(holder):
+		_build_boxes(holder)
+
+
+func _artwork_path() -> String:
+	var id := str(profile.get("id", ""))
+	if id == "geoscan_pioneer_mini":
+		return "res://data/models/flight/drone.glb"
+	if id == "geoscan_pioneer_fpv":
+		return "res://data/models/flight/geoscan_pioneer_fpv.glb"
+	if id == "dji_phantom_4_pro":
+		return "res://data/models/flight/dji_phantom.glb"
+	return ""
+
+
+func _attach_artwork(holder: Node3D) -> bool:
+	var path := _artwork_path()
+	if path.is_empty() or not ResourceLoader.exists(path):
+		return false
+	var packed := load(path) as PackedScene
+	if packed == null:
+		return false
+	var root := packed.instantiate() as Node3D
+	if root == null:
+		return false
+	root.name = "Artwork"
+	holder.add_child(root)
+	var bounds := _local_bounds(root)
+	if bounds.size.length() < 0.02:
+		root.queue_free()
+		return false
+	var fit := _artwork_fit(root, bounds)
+	var clearance := maxf(float(model.get("height", 0.08)) * 0.5, 0.02)
+	var center := bounds.get_center()
+	root.scale = Vector3.ONE * fit
+	# Низ картинки садится на ту же высоту, с которой считает касание земли расчёт.
+	root.position = Vector3(-center.x * fit, -clearance - bounds.position.y * fit, -center.z * fit)
+	_collect_rotors(root)
+	return true
+
+
+func _artwork_fit(root: Node3D, bounds: AABB) -> float:
+	var id := str(profile.get("id", ""))
+	if id == "dji_phantom_4_pro":
+		var front := root.find_child("Propeller_0", true, false) as Node3D
+		var rear := root.find_child("Propeller_3", true, false) as Node3D
+		if front != null and rear != null:
+			var diagonal := front.global_position.distance_to(rear.global_position)
+			if diagonal > 0.05:
+				# Паспорт: диагональ между моторами без винтов, 350 мм.
+				return 0.35 / diagonal
+	if id == "geoscan_pioneer_fpv":
+		var narrow := minf(bounds.size.x, bounds.size.z)
+		if narrow > 0.02:
+			return 0.18 / narrow
+	var wide := maxf(bounds.size.x, bounds.size.z)
+	if wide < 0.02:
+		return 1.0
+	if id == "geoscan_pioneer_mini":
+		return 0.175 / wide
+	var passport_width := maxf(float(model.get("width", wide)), 0.12)
+	return passport_width / wide
+
+
+func _local_bounds(root: Node3D) -> AABB:
+	var box := AABB()
+	var first := true
+	var to_local := root.global_transform.affine_inverse()
+	for item in root.find_children("*", "MeshInstance3D", true, false):
+		var mesh := item as MeshInstance3D
+		if mesh.mesh == null:
+			continue
+		var piece: AABB = (to_local * mesh.global_transform) * mesh.get_aabb()
+		if first:
+			box = piece
+			first = false
+		else:
+			box = box.merge(piece)
+	return box
+
+
+func _collect_rotors(root: Node3D) -> void:
+	for index in 4:
+		var sign := 1.0 if index == 0 or index == 3 else -1.0
+		for prefix in ["Propeller_", "PropHub_", "PropCap_", "PropHubMark_"]:
+			var node := root.find_child("%s%d" % [prefix, index], true, false) as Node3D
+			if node == null:
+				continue
+			node.set_meta("spin_sign", sign)
+			_props.append(node)
+
+
+func _build_boxes(holder: Node3D) -> void:
 	var width := maxf(float(model.get("width", 0.3)), 0.12)
 	var height := maxf(float(model.get("height", 0.08)), 0.04)
 	var body := MeshInstance3D.new()
@@ -293,7 +403,7 @@ func _build_mesh() -> void:
 	box.size = Vector3(width * 0.42, height * 0.65, width * 0.42)
 	body.mesh = box
 	body.material_override = _paint(_body_color())
-	add_child(body)
+	holder.add_child(body)
 	var reach := width * 0.46
 	for axis in [Vector3(1, 0, 0), Vector3(0, 0, 1)]:
 		var arm := MeshInstance3D.new()
@@ -302,7 +412,8 @@ func _build_mesh() -> void:
 		arm.mesh = arm_mesh
 		arm.position.y = height * 0.05
 		arm.material_override = _paint(Color(0.22, 0.24, 0.27))
-		add_child(arm)
+		holder.add_child(arm)
+	var corner_index := 0
 	for corner in [Vector3(1, 0, 1), Vector3(1, 0, -1), Vector3(-1, 0, 1), Vector3(-1, 0, -1)]:
 		var motor := MeshInstance3D.new()
 		var motor_mesh := CylinderMesh.new()
@@ -312,7 +423,7 @@ func _build_mesh() -> void:
 		motor.mesh = motor_mesh
 		motor.position = Vector3(corner.x, height * 0.15, corner.z) * reach * 0.72
 		motor.material_override = _paint(Color(0.12, 0.12, 0.13))
-		add_child(motor)
+		holder.add_child(motor)
 		var prop := MeshInstance3D.new()
 		var prop_mesh := CylinderMesh.new()
 		var radius := maxf(width * 0.16, 0.035)
@@ -322,8 +433,10 @@ func _build_mesh() -> void:
 		prop.mesh = prop_mesh
 		prop.position = motor.position + Vector3(0, 0.03, 0)
 		prop.material_override = _paint(Color(0.8, 0.82, 0.85, 0.8))
-		add_child(prop)
+		prop.set_meta("spin_sign", 1.0 if corner_index == 0 or corner_index == 3 else -1.0)
+		holder.add_child(prop)
 		_props.append(prop)
+		corner_index += 1
 
 
 func _body_color() -> Color:

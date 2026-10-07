@@ -141,7 +141,9 @@ func resolve(pos: Vector3, vel: Vector3, radius: float, vertical_radius: float =
 		for cx in range(min_cell.x, max_cell.x + 1):
 			var key := Vector2i(cx, cz)
 			if _tree_cells.has(key):
-				nearby.append_array(_tree_cells[key])
+				for branch in _tree_cells[key]:
+					if _branch_near(branch, pos, TREE_QUERY_RADIUS + radius):
+						nearby.append(branch)
 	if nearby.is_empty():
 		return Contacts.resolve(solids, pos, vel, radius, vertical_radius)
 	var candidates: Array[Dictionary] = []
@@ -151,6 +153,12 @@ func resolve(pos: Vector3, vel: Vector3, radius: float, vertical_radius: float =
 
 func _tree_cell(point: Vector2) -> Vector2i:
 	return Vector2i(floori(point.x / TREE_CELL_SIZE), floori(point.y / TREE_CELL_SIZE))
+
+func _branch_near(branch: Dictionary, pos: Vector3, distance: float) -> bool:
+	var a: Vector3 = branch["a"]
+	var b: Vector3 = branch["b"]
+	var margin := distance + float(branch["radius"])
+	return pos.x >= minf(a.x, b.x) - margin and pos.x <= maxf(a.x, b.x) + margin and pos.z >= minf(a.z, b.z) - margin and pos.z <= maxf(a.z, b.z) + margin and pos.y >= minf(a.y, b.y) - margin and pos.y <= maxf(a.y, b.y) + margin
 
 func _index_tree_branch(branch: Dictionary) -> void:
 	var midpoint: Vector3 = (branch["a"] as Vector3 + branch["b"] as Vector3) * 0.5

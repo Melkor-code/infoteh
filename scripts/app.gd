@@ -120,7 +120,9 @@ func _physics_process(delta: float) -> void:
 	var had_motors := craft.motors_on
 	var hit := {"note": ""}
 	# At most half a body radius travelled per substep prevents thin-wall tunnelling.
-	var substeps := clampi(int(ceil(maxf(delta * 120.0, craft.velocity.length() * delta / maxf(craft.collision_radius * 0.5, 0.02)))), 1, 64)
+	# Не допускаем спираль перегрузки: большой delta после просадки FPS не
+	# должен запускать десятки дополнительных физических подшагов.
+	var substeps := clampi(int(ceil(maxf(delta * 120.0, craft.velocity.length() * delta / maxf(craft.collision_radius * 0.5, 0.02)))), 1, 8)
 	for substep in substeps:
 		_sync_surface()
 		craft.step(delta / float(substeps))

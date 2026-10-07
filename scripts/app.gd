@@ -8,6 +8,8 @@ const FlightOverlay = preload("res://scripts/flight_overlay.gd")
 const DayNight = preload("res://scripts/day_night.gd")
 const FlightTrace = preload("res://scripts/flight_trace.gd")
 const CanopyDrag = preload("res://scripts/canopy_drag.gd")
+const InterfaceHud = preload("res://scripts/interface_hud.gd")
+const UiTheme = preload("res://scripts/ui_theme.gd")
 
 const TERRAIN_POLYGON := 0
 const TERRAIN_COURSE := 1
@@ -94,6 +96,13 @@ var max_tilt_deg := 0.0
 var sample_timer := 0.0
 var sample_lines: PackedStringArray = []
 var report_warnings: PackedStringArray = []
+var home_position := Vector3.ZERO
+var route_points: Array[Vector3] = []
+var interface_hud: Control
+var pause_panel: PanelContainer
+var paused := false
+var clean_screen := false
+var hud_scale := 1.0
 
 
 func _ready() -> void:
@@ -105,7 +114,7 @@ func _ready() -> void:
 
 
 func _physics_process(delta: float) -> void:
-	if not flying or craft == null:
+	if not flying or craft == null or paused:
 		return
 	_read_flight_input(delta)
 	_update_gust(delta)
@@ -190,6 +199,8 @@ func _process(_delta: float) -> void:
 		button.set_pressed_no_signal(day_night.cycling)
 	if craft != null:
 		craft.navigation_lights.visible = lights_on and day_night.daylight < 0.5
+		# FPV получает отдельный OSD без старой верхней строки телеметрии.
+		flight_panel.visible = flying and camera_mode != 1 and not paused
 	trace.visible = show_trace and flying
 	if camera == null:
 		return
@@ -243,7 +254,13 @@ func _unhandled_input(event: InputEvent) -> void:
 		elif event.keycode == KEY_B:
 			_toggle_forces()
 		elif event.keycode == KEY_ESCAPE and flying:
-			_back_to_menu()
+			_toggle_pause()
+		elif event.keycode == KEY_F10 and flying:
+			clean_screen = not clean_screen
+			interface_hud.clean_screen = clean_screen
+		elif event.keycode == KEY_F11 and flying:
+			hud_scale = 1.15 if hud_scale < 1.1 else 1.0
+			interface_hud.hud_scale = hud_scale
 
 
 func _build_world() -> void:
@@ -310,6 +327,7 @@ func _build_ui() -> void:
 	var layer := CanvasLayer.new()
 	add_child(layer)
 	menu_panel = _panel(Vector2(24, 24), Vector2(460, 660))
+	menu_panel.theme = UiTheme.get_theme()
 	layer.add_child(menu_panel)
 	var outer := VBoxContainer.new()
 	outer.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -366,6 +384,7 @@ func _build_ui() -> void:
 	_apply_terrain()
 
 	flight_panel = _panel(Vector2(8, 8), Vector2(1264, 124))
+	flight_panel.theme = UiTheme.get_theme()
 	flight_panel.visible = false
 	var tight := flight_panel.get_theme_stylebox("panel") as StyleBoxFlat
 	if tight != null:
@@ -459,6 +478,10 @@ func _build_ui() -> void:
 	warning_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	warning_label.add_theme_color_override("font_color", Color(1.0, 0.86, 0.4))
 	layer.add_child(warning_label)
+	interface_hud = InterfaceHud.new()
+	interface_hud.setup(self)
+	layer.add_child(interface_hud)
+	_build_pause_panel(layer)
 
 
 func _select(index: int) -> void:
@@ -496,6 +519,7 @@ func _start_flight() -> void:
 	var spot := _start_spot()
 	var clearance := craft.ground_clearance
 	craft.position = Vector3(spot.x, field.sample_height(spot.x, spot.z) + clearance + 0.04, spot.z)
+	home_position = craft.position
 	overlay = FlightOverlay.new()
 	craft.add_child(overlay)
 	overlay.call("setup")
@@ -507,6 +531,10 @@ func _start_flight() -> void:
 	craft.air_temp = air_temp
 	orbit_distance = maxf(craft.collision_radius * 16.0, 2.0)
 	flying = true
+	paused = false
+	clean_screen = false
+	interface_hud.clean_screen = false
+	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 	warned = false
 	log_lines.clear()
 	report_warnings.clear()
@@ -539,6 +567,7 @@ func _back_to_menu() -> void:
 	conditions_panel.hide()
 	trace.visible = false
 	flying = false
+	paused = false
 	overlay = null
 	if craft != null:
 		craft.queue_free()
@@ -549,6 +578,7 @@ func _back_to_menu() -> void:
 	mouse_stick = false
 	mouse_pitch = 0.0
 	mouse_roll = 0.0
+	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 	for key in hud_slots:
 		(hud_slots[key] as Label).text = ""
 	status_flash = ""
@@ -854,6 +884,76 @@ func _save_log() -> void:
 func _show_menu() -> void:
 	menu_panel.visible = true
 	flight_panel.visible = false
+	if pause_panel != null:
+		pause_panel.hide()
+
+
+func _toggle_pause() -> void:
+	if not flying:
+		return
+	if conditions_panel != null and conditions_panel.visible:
+		conditions_panel.hide()
+		return
+	paused = not paused
+	pause_panel.visible = paused
+	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+
+
+func _build_pause_panel(layer: CanvasLayer) -> void:
+	pause_panel = _panel(Vector2(0, 0), Vector2(380, 250))
+	pause_panel.theme = UiTheme.get_theme()
+	pause_panel.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
+	pause_panel.position -= pause_panel.size * 0.5
+	pause_panel.hide()
+	layer.add_child(pause_panel)
+	var box := VBoxContainer.new()
+	box.add_theme_constant_override("separation", 10)
+	pause_panel.add_child(box)
+	box.add_child(_title("Пауза"))
+	box.add_child(_hint("Управление дроном приостановлено. ESC возвращает к полёту."))
+	var resume := Button.new()
+	resume.text = "Продолжить"
+	resume.pressed.connect(_toggle_pause)
+	box.add_child(resume)
+	var settings := Button.new()
+	settings.text = "Настройки полёта"
+	settings.pressed.connect(func() -> void:
+		conditions_panel.visible = true
+		pause_panel.hide()
+	)
+	box.add_child(settings)
+	var restart := Button.new()
+	restart.text = "Перезапустить"
+	restart.pressed.connect(_start_flight)
+	box.add_child(restart)
+	var finish := Button.new()
+	finish.text = "Завершить полёт"
+	finish.pressed.connect(_back_to_menu)
+	box.add_child(finish)
+
+
+func _ui_theme() -> Theme:
+	var theme := Theme.new()
+	theme.default_font_size = 15
+	theme.set_color("font_color", "Label", Color(0.88, 0.92, 0.96))
+	theme.set_color("font_hover_color", "Button", Color.WHITE)
+	theme.set_color("font_pressed_color", "Button", Color(0.85, 0.95, 1.0))
+	theme.set_color("font_color", "Button", Color(0.76, 0.82, 0.88))
+	theme.set_font_size("font_size", "Button", 14)
+	var button := StyleBoxFlat.new()
+	button.bg_color = Color(0.08, 0.12, 0.16, 0.94)
+	button.border_color = Color(0.25, 0.55, 0.68, 0.65)
+	button.set_border_width_all(1)
+	button.set_corner_radius_all(5)
+	button.content_margin_left = 12
+	button.content_margin_right = 12
+	button.content_margin_top = 7
+	button.content_margin_bottom = 7
+	theme.set_stylebox("normal", "Button", button)
+	var hover := button.duplicate()
+	hover.bg_color = Color(0.12, 0.22, 0.28, 0.98)
+	theme.set_stylebox("hover", "Button", hover)
+	return theme
 
 
 func _terrain_picker() -> OptionButton:

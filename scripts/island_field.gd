@@ -418,6 +418,18 @@ func _nature_spot(x: float, z: float, margin: float = 0.0) -> bool:
 		return false
 	return island_radius(x, z) < 0.88 and lake_distance(x, z) > 13.0 + margin and sample_height(x, z) > 4.0 and sample_height(x, z) < 20.0
 
+func _forest_density(x: float, z: float) -> float:
+	# Базовая плотность оставляет просеки. В трёх секторах лес становится гуще,
+	# чтобы остров выглядел неоднородно, а город и полигон сохраняли обзор.
+	var density := 0.68
+	if Rect2(-270, -180, 105, 95).has_point(Vector2(x, z)):
+		density = 0.88
+	if Rect2(-265, 46, 112, 112).has_point(Vector2(x, z)):
+		density = maxf(density, 0.84)
+	if Rect2(164, -172, 108, 100).has_point(Vector2(x, z)):
+		density = maxf(density, 0.80)
+	return density
+
 func _build_nature() -> void:
 	var envelope_data: Dictionary = JSON.parse_string(FileAccess.get_file_as_string("res://assets/map/trees/envelopes.json"))
 	var buckets: Dictionary = {}
@@ -425,7 +437,7 @@ func _build_nature() -> void:
 		for x in range(-275, 280, 11):
 			var px := x + _rng.randf_range(-3, 3)
 			var pz := z + _rng.randf_range(-3, 3)
-			if not _nature_spot(px, pz, 3) or _rng.randf() > 0.68:
+			if not _nature_spot(px, pz, 3) or _rng.randf() > _forest_density(px, pz):
 				continue
 			var kind := _rng.randi_range(0, 3)
 			var variant := _rng.randi_range(0, 1)

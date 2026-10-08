@@ -848,6 +848,8 @@ func _save_log() -> void:
 		report_dialog = FileDialog.new()
 		report_dialog.file_mode = FileDialog.FILE_MODE_OPEN_DIR
 		report_dialog.access = FileDialog.ACCESS_FILESYSTEM
+		report_dialog.use_native_dialog = true
+		report_dialog.current_dir = OS.get_system_dir(OS.SYSTEM_DIR_DOCUMENTS)
 		report_dialog.title = "Выберите папку для отчёта"
 		report_dialog.ok_button_text = "Выбрать папку"
 		report_dialog.dir_selected.connect(_write_report)

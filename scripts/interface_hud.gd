@@ -79,18 +79,12 @@ func _legend_item(value: String, point: Vector2, color: Color, s: float) -> void
 
 
 func _draw_warning(value: String, y: float, s: float, view_width: float) -> void:
-	var panel := StyleBoxFlat.new()
-	panel.bg_color = Color(0.10, 0.025, 0.03, 0.94)
-	panel.border_color = Color("#e34b55")
-	panel.set_border_width_all(1)
-	panel.set_corner_radius_all(6)
-	panel.content_margin_left = 12
-	panel.content_margin_right = 12
-	var width := minf(820.0 * s, view_width - 48.0 * s)
-	var rect := Rect2(24 * s, y, width, 27 * s)
-	draw_style_box(panel, rect)
-	draw_circle(Vector2(rect.position.x + 13 * s, rect.position.y + 13.5 * s), 4.5 * s, Color("#ff5d67"))
-	_text(value, rect.position + Vector2(25, 18) * s, int(13 * s), Color("#ffb8bc"))
+	# Предупреждение не закрывает обзор: только индикатор и текст.
+	var point := Vector2(24 * s, y + 17 * s)
+	draw_circle(point, 5.0 * s, Color("#650f1a"))
+	draw_circle(point, 3.5 * s, Color("#ff5d67"))
+	draw_string_outline(font, point + Vector2(14, 5) * s, value, HORIZONTAL_ALIGNMENT_LEFT, -1, int(13 * s), 3, Color(0, 0, 0, 0.9))
+	draw_string(font, point + Vector2(14, 5) * s, value, HORIZONTAL_ALIGNMENT_LEFT, -1, int(13 * s), Color("#ffb8bc"))
 
 
 func _draw_map(rect: Rect2, s: float) -> void:

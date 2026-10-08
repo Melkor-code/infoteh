@@ -210,6 +210,11 @@ func _sync_surface() -> void:
 
 func _process(_delta: float) -> void:
 	_refresh_time_labels()
+	if flight_panel != null:
+		# PanelContainer can grow to the intrinsic width of its buttons; keep the toolbar inside the viewport.
+		var viewport_size := Vector2(get_tree().root.size)
+		flight_panel.position = Vector2(8, 8)
+		flight_panel.size = Vector2(maxf(viewport_size.x - 24.0, 0.0), 62.0)
 	if paused:
 		flight_panel.hide()
 		return
@@ -425,14 +430,20 @@ func _build_ui() -> void:
 	flight_panel = _panel(Vector2(8, 8), Vector2(1264, 92))
 	flight_panel.theme = UiTheme.get_theme()
 	flight_panel.visible = false
-	flight_panel.set_anchors_preset(Control.PRESET_TOP_WIDE)
+	flight_panel.anchor_left = 0.0
+	flight_panel.anchor_top = 0.0
+	flight_panel.anchor_right = 1.0
+	flight_panel.anchor_bottom = 0.0
+	flight_panel.grow_horizontal = Control.GROW_DIRECTION_END
+	flight_panel.grow_vertical = Control.GROW_DIRECTION_END
+	flight_panel.clip_contents = true
 	flight_panel.offset_left = 8
 	flight_panel.offset_top = 8
-	flight_panel.offset_right = -8
+	flight_panel.offset_right = -16
 	flight_panel.offset_bottom = 70
 	layer.add_child(flight_panel)
 	var flight_box := HBoxContainer.new()
-	flight_box.add_theme_constant_override("separation", 6)
+	flight_box.add_theme_constant_override("separation", 3)
 	flight_box.custom_minimum_size.y = 30
 	flight_box.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	flight_panel.add_child(flight_box)

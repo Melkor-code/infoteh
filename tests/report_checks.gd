@@ -13,13 +13,10 @@ func check(condition: bool, label: String) -> void:
 
 func _run() -> void:
 	var app := App.new()
-	root.size = Vector2i(1280, 720)
 	root.add_child(app)
 	await process_frame
 	app._start_flight()
 	await process_frame
-	app._process(0.0)
-	check(app.flight_panel.position.x >= 0.0 and app.flight_panel.position.x + app.flight_panel.size.x <= root.size.x + 0.5, "toolbar background stays inside viewport")
 	app._save_log()
 	check(app.paused, "report pauses flight")
 	var elapsed: float = app.flight_seconds

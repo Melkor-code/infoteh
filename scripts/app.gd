@@ -96,6 +96,7 @@ var max_tilt_deg := 0.0
 var sample_timer := 0.0
 var sample_lines: PackedStringArray = []
 var report_warnings: PackedStringArray = []
+var report_dialog: FileDialog
 var home_position := Vector3.ZERO
 var route_points: Array[Vector3] = []
 var interface_hud: Control
@@ -762,7 +763,10 @@ func _wind_from_name() -> String:
 
 
 func _log(line: String) -> void:
-	log_lines.append(line)
+	var clean := line.strip_edges()
+	if clean == "" or (not log_lines.is_empty() and log_lines[-1].ends_with(clean)):
+		return
+	log_lines.append("[%06.1f с] %s" % [flight_seconds, clean])
 	if log_lines.size() > 40:
 		log_lines.remove_at(0)
 
@@ -824,10 +828,25 @@ func _report_conclusion(profile: Dictionary, described: Dictionary) -> String:
 
 
 func _save_log() -> void:
+	if report_dialog == null:
+		report_dialog = FileDialog.new()
+		report_dialog.file_mode = FileDialog.FILE_MODE_OPEN_DIR
+		report_dialog.access = FileDialog.ACCESS_FILESYSTEM
+		report_dialog.title = "Выберите папку для отчёта"
+		report_dialog.ok_button_text = "Выбрать папку"
+		report_dialog.dir_selected.connect(_write_report)
+		add_child(report_dialog)
+	report_dialog.popup_centered_ratio(0.72)
+	return
+
+
+func _write_report(folder: String) -> void:
 	if craft != null and sample_lines.is_empty():
 		_take_sample()
-	var text_path := "user://flight_report.txt"
-	var table_path := "user://flight_samples.csv"
+	var text_path := folder.path_join("отчёт_полёта.txt")
+	var table_path := folder.path_join("телеметрия_полёта.csv")
+	var html_path := folder.path_join("графики_полёта.html")
+	var events_path := folder.path_join("журнал_событий.txt")
 	var text_file := FileAccess.open(text_path, FileAccess.WRITE)
 	if text_file == null:
 		status_flash = "Не удалось записать отчёт."
@@ -867,13 +886,15 @@ func _save_log() -> void:
 	else:
 		for item in report_warnings:
 			lines.append("- " + item)
-	lines.append("Таблица: flight_samples.csv в той же папке. Точка раз в секунду, разделитель — точка с запятой.")
-	lines.append("В таблице крен, тангаж, курс, батарея, моторы и сигнал — датчики с шумом. Высота и скорость — из модели.")
+	lines.append("Таблица: телеметрия_полёта.csv. Точка измерения — примерно раз в секунду, разделитель — точка с запятой.")
+	lines.append("Графики: графики_полёта.html. Все подписи и единицы измерения указаны на русском языке.")
 	if sample_lines.size() >= 1200:
 		lines.append("Таблица обрезана: записаны первые 20 минут.")
 	lines.append("")
 	lines.append("Журнал:")
-	lines.append_array(log_lines)
+	for event_line in log_lines:
+		if event_line.strip_edges() != "":
+			lines.append(event_line)
 	text_file.store_string("\n".join(lines))
 	text_file.close()
 	var table := FileAccess.open(table_path, FileAccess.WRITE)
@@ -881,14 +902,64 @@ func _save_log() -> void:
 		status_flash = "Текст записан, таблицу записать не удалось."
 		status_flash_time = 5.0
 		return
-	table.store_line("t_s;alt_m;speed_ms;roll_deg;pitch_deg;yaw_deg;battery_pct;motor_c;signal_pct;throttle;wind_ms;gust_ms")
+	table.store_line("время_с;высота_м;скорость_м_с;крен_град;тангаж_град;курс_град;заряд_проц;температура_моторов_град;сигнал_проц;тяга_проц;ветер_м_с;порывы_м_с")
 	for row in sample_lines:
 		table.store_line(row)
 	table.close()
-	var folder := ProjectSettings.globalize_path("user://")
-	status_flash = "Отчёт и таблица: " + folder
+	var events_file := FileAccess.open(events_path, FileAccess.WRITE)
+	if events_file != null:
+		for event_line in log_lines:
+			if event_line.strip_edges() != "":
+				events_file.store_line(event_line)
+		events_file.close()
+	var html_file := FileAccess.open(html_path, FileAccess.WRITE)
+	if html_file != null:
+		html_file.store_string(_report_html())
+		html_file.close()
+	status_flash = "Отчёт, таблица и графики сохранены: " + folder
 	status_flash_time = 8.0
-	_log("Отчёт сохранён")
+
+
+func _chart_svg(title: String, column: int, unit: String, color: String) -> String:
+	var values: Array[float] = []
+	for row in sample_lines:
+		var fields := row.split(";")
+		if column < fields.size():
+			values.append(float(fields[column]))
+	if values.is_empty():
+		return "<section><h2>" + title + "</h2><p>Нет данных</p></section>"
+	var low := values[0]
+	var high := values[0]
+	for value in values:
+		low = minf(low, value)
+		high = maxf(high, value)
+	var span := maxf(high - low, 0.001)
+	var points := PackedStringArray()
+	for i in values.size():
+		var x := 40.0 + 700.0 * float(i) / maxf(values.size() - 1, 1)
+		var y := 180.0 - 140.0 * (values[i] - low) / span
+		points.append("%.1f,%.1f" % [x, y])
+	return "<section><h2>%s</h2><svg viewBox='0 0 780 220' role='img' aria-label='%s'>" % [title, title] + \
+		"<line x1='40' y1='180' x2='740' y2='180' stroke='#7b8794'/><line x1='40' y1='40' x2='40' y2='180' stroke='#7b8794'/>" + \
+		"<polyline fill='none' stroke='%s' stroke-width='3' points='%s'/>" % [color, " ".join(points)] + \
+		"<text x='46' y='34'>макс. %.2f %s</text><text x='46' y='205'>мин. %.2f %s</text>" % [high, unit, low, unit] + \
+		"</svg></section>"
+
+
+func _report_html() -> String:
+	var html := "<!doctype html><html lang='ru'><head><meta charset='utf-8'><title>Графики полёта</title>"
+	html += "<style>body{font-family:Arial,sans-serif;background:#f3f5f7;color:#18222d;max-width:860px;margin:24px auto;padding:0 20px}h1{font-size:28px}section{background:white;border:1px solid #cbd5df;border-radius:10px;padding:12px 18px;margin:16px 0}h2{font-size:19px;margin:4px 0 8px}svg{width:100%;height:auto;background:#f8fafb}text{font-size:12px;fill:#526170}</style></head><body>"
+	html += "<h1>Графики полёта БПЛА</h1><p>Данные симуляции. Время по горизонтали, значения и единицы указаны на каждом графике.</p>"
+	html += _chart_svg("Высота", 1, "м", "#2672c8")
+	html += _chart_svg("Скорость", 2, "м/с", "#d77a19")
+	html += _chart_svg("Углы ориентации: крен", 3, "°", "#8e44ad")
+	html += _chart_svg("Углы ориентации: тангаж", 4, "°", "#16a085")
+	html += _chart_svg("Курс", 5, "°", "#c0392b")
+	html += _chart_svg("Заряд батареи", 6, "%", "#2e8b57")
+	html += _chart_svg("Температура моторов", 7, "°C", "#b03a2e")
+	html += _chart_svg("Сигнал связи", 8, "%", "#1f618d")
+	html += "</body></html>"
+	return html
 
 
 func _show_menu() -> void:

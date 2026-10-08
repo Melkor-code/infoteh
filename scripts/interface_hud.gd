@@ -36,7 +36,7 @@ func _draw() -> void:
 	if app.camera_mode == 1:
 		_draw_osd(view, s)
 	if snapshot.warning != "":
-		_text(str(snapshot.warning), Vector2(24, left.position.y - 14), 13, Color("#f0dfb8"))
+		_draw_warning(str(snapshot.warning), left.position.y - 34.0 * s, s, view.x)
 
 func _rows(rect: Rect2, title: String, rows: Array, width: float, s: float) -> void:
 	_text(title, rect.position + Vector2(12, 22) * s, int(13 * s), Color("#c8c8c4"))
@@ -70,12 +70,27 @@ func _map_label(value: String, point: Vector2, color: Color, s: float) -> void:
 
 
 func _legend_item(value: String, point: Vector2, color: Color, s: float) -> void:
-	var fs := int(9 * s)
-	var marker := Rect2(point + Vector2(0, -8) * s, Vector2(7, 7) * s)
+	var fs := int(10 * s)
+	var marker := Rect2(point + Vector2(0, -9) * s, Vector2(9, 9) * s)
 	draw_rect(marker, color)
 	draw_rect(marker, Color(0.82, 0.9, 0.95, 0.85), false, maxf(s, 1.0))
 	draw_string_outline(font, point + Vector2(12, 0) * s, value, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, 1, Color(0, 0, 0, 0.9))
 	draw_string(font, point + Vector2(12, 0) * s, value, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, Color("#dce7ef"))
+
+
+func _draw_warning(value: String, y: float, s: float, view_width: float) -> void:
+	var panel := StyleBoxFlat.new()
+	panel.bg_color = Color(0.10, 0.025, 0.03, 0.94)
+	panel.border_color = Color("#e34b55")
+	panel.set_border_width_all(1)
+	panel.set_corner_radius_all(6)
+	panel.content_margin_left = 12
+	panel.content_margin_right = 12
+	var width := minf(820.0 * s, view_width - 48.0 * s)
+	var rect := Rect2(24 * s, y, width, 27 * s)
+	draw_style_box(panel, rect)
+	draw_circle(Vector2(rect.position.x + 13 * s, rect.position.y + 13.5 * s), 4.5 * s, Color("#ff5d67"))
+	_text(value, rect.position + Vector2(25, 18) * s, int(13 * s), Color("#ffb8bc"))
 
 
 func _draw_map(rect: Rect2, s: float) -> void:

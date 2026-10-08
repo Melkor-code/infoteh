@@ -429,7 +429,7 @@ func _build_ui() -> void:
 	flight_panel.offset_left = 8
 	flight_panel.offset_top = 8
 	flight_panel.offset_right = -8
-	flight_panel.offset_bottom = 100
+	flight_panel.offset_bottom = 70
 	layer.add_child(flight_panel)
 	var flight_box := HBoxContainer.new()
 	flight_box.add_theme_constant_override("separation", 6)

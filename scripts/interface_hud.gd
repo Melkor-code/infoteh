@@ -72,26 +72,18 @@ func _map_label(value: String, point: Vector2, color: Color, s: float) -> void:
 func _draw_map(rect: Rect2, s: float) -> void:
 	_text("ОСТРОВ  /  СЕВЕР ↑", rect.position + Vector2(12, 22) * s, int(13 * s), Color("#e5edf7"))
 	var area := Rect2(rect.position + Vector2(12, 34) * s, Vector2(276, 176) * s)
-	draw_rect(area, Color("#071622"))
-	for x in range(1, 7):
-		var gx := area.position.x + area.size.x * float(x) / 7.0
-		draw_line(Vector2(gx, area.position.y), Vector2(gx, area.end.y), Color("#163243"), s)
-	for y in range(1, 5):
-		var gy := area.position.y + area.size.y * float(y) / 5.0
-		draw_line(Vector2(area.position.x, gy), Vector2(area.end.x, gy), Color("#163243"), s)
+	draw_rect(area, Color("#06121d"))
 	var island := PackedVector3Array()
 	for i in 96:
 		var angle: float = TAU * i / 96.0
 		var radius := 1.0 + 0.016 * sin(angle * 5.0) + 0.01 * cos(angle * 9.0)
 		island.append(Vector3(cos(angle) * 310 * radius, 0, sin(angle) * 210 * radius))
-	_map_boundary(area, island, Color("#194538"), Color("#72b59b"), s)
-	var field = app.field
-	for i in field.LAKE_CENTERS.size():
-		var lake := PackedVector3Array()
-		for j in 32:
-			var angle: float = TAU * j / 32.0
-			lake.append(field.LAKE_CENTERS[i] + Vector3(cos(angle), 0, sin(angle)) * field.LAKE_RADII[i])
-		_map_boundary(area, lake, Color("#147fd1"), Color("#86d8ff"), s)
+	_map_boundary(area, island, Color("#173f34"), Color("#70b596"), s)
+	var lake := PackedVector3Array()
+	for i in 48:
+		var angle: float = TAU * i / 48.0
+		lake.append(Vector3(-132 + cos(angle) * 67.0, 0, -101 + sin(angle) * 42.0))
+	_map_boundary(area, lake, Color("#087fc8"), Color("#8be7ff"), s)
 	var city := Rect2(_map_point(area, Vector3(-72, 0, -60)), _map_point(area, Vector3(72, 0, 60)) - _map_point(area, Vector3(-72, 0, -60)))
 	draw_rect(city, Color("#56697b"))
 	draw_rect(city, Color("#e2edf7"), false, 1.5 * s)
@@ -101,21 +93,20 @@ func _draw_map(rect: Rect2, s: float) -> void:
 			draw_rect(building, Color("#8b9cae"))
 			draw_rect(building, Color.WHITE, false, s)
 	var course := Rect2(_map_point(area, Vector3(-250, 0, -40)), _map_point(area, Vector3(-94, 0, 20)) - _map_point(area, Vector3(-250, 0, -40)))
-	draw_rect(course, Color("#9a7019"))
-	draw_rect(course, Color("#ffdd55"), false, 2 * s)
+	draw_rect(course, Color("#d19b18"))
+	draw_rect(course, Color("#111820"), false, 2 * s)
 	for i in 4:
-		draw_circle(course.position + Vector2(10 + i * 13, 12) * s, 3 * s, Color("#ffed92"), false, s)
-	for hill in field.HILLS:
-		var outline := PackedVector3Array()
-		for j in 24:
-			var angle: float = TAU * j / 24.0
-			outline.append(hill + Vector3(cos(angle) * 31, 0, sin(angle) * 28))
-		_map_boundary(area, outline, Color("#885234"), Color("#e7a976"), s)
-	_map_label("ОЗЕРО", area.position + Vector2(8, 18) * s, Color("#86d8ff"), s)
-	_map_label("ГОРОД", area.position + Vector2(151, 18) * s, Color("#e2edf7"), s)
-	_map_label("ПОЛИГОН", area.position + Vector2(8, 155) * s, Color("#ffdd55"), s)
-	_map_label("АБДО", area.position + Vector2(222, 155) * s, Color("#e7a976"), s)
-	# Путь всегда поверх географических зон; сохраняем все его точки.
+		draw_circle(course.position + Vector2(10 + i * 13, 12) * s, 3 * s, Color("#fff3a3"), false, s)
+	# Горы — отдельная стилизованная зона с треугольными пиками.
+	for i in range(4):
+		var peak := _map_point(area, Vector3(87 + i * 34, 0, 145 - i * 31))
+		var triangle := PackedVector2Array([peak + Vector2(-14, 10) * s, peak + Vector2(0, -16) * s, peak + Vector2(16, 10) * s])
+		draw_colored_polygon(triangle, Color("#795b4c"))
+		draw_polyline(PackedVector2Array([triangle[0], triangle[1], triangle[2], triangle[0]]), Color("#d8aa86"), 1.5 * s, true)
+	_map_label("ОЗЕРО", rect.position + Vector2(12, 230) * s, Color("#86eaff"), s)
+	_map_label("ГОРОД", rect.position + Vector2(76, 230) * s, Color("#e2edf7"), s)
+	_map_label("ПОЛИГОН", rect.position + Vector2(145, 230) * s, Color("#ffdd55"), s)
+	_map_label("ГОРЫ", rect.position + Vector2(230, 230) * s, Color("#e7b08c"), s)
 	var route: Array = snapshot.get("route", [])
 	if route.size() > 1:
 		var path := PackedVector2Array()
@@ -135,15 +126,11 @@ func _draw_map(rect: Rect2, s: float) -> void:
 	arrow.append(arrow[0])
 	draw_polyline(arrow, Color("#071019"), 5 * s, true)
 	draw_polyline(arrow, Color.WHITE, 2 * s, true)
-	var legend := rect.position + Vector2(12, 230) * s
-	draw_circle(legend + Vector2(4, -4) * s, 4 * s, Color("#ff941c"))
-	_text("Дрон", legend + Vector2(14, 0) * s, int(11 * s))
-	draw_rect(Rect2(legend + Vector2(63, -9) * s, Vector2(8, 8) * s), Color("#5fefff"), false, s)
-	_text("Старт", legend + Vector2(78, 0) * s, int(11 * s))
-	draw_line(legend + Vector2(127, -4) * s, legend + Vector2(142, -4) * s, Color("#ffe637"), 3 * s)
-	_text("Путь", legend + Vector2(148, 0) * s, int(11 * s))
-	_text("Лес", legend + Vector2(225, 0) * s, int(11 * s), Color("#72b59b"))
-	draw_rect(Rect2(legend + Vector2(210, -9) * s, Vector2(8, 8) * s), Color("#194538"))
+	var legend := rect.position + Vector2(12, 250) * s
+	draw_rect(Rect2(legend + Vector2(4, -9) * s, Vector2(8, 8) * s), Color("#5fefff"), false, 2 * s)
+	_text("Старт", legend + Vector2(18, 0) * s, int(11 * s))
+	draw_rect(Rect2(legend + Vector2(90, -9) * s, Vector2(8, 8) * s), Color("#173f34"))
+	_text("Лес", legend + Vector2(104, 0) * s, int(11 * s), Color("#70b596"))
 
 func _draw_osd(view: Vector2, s: float) -> void:
 	var center := view * 0.5
@@ -161,3 +148,4 @@ func _draw_osd(view: Vector2, s: float) -> void:
 func _text(value: String, point: Vector2, font_size: int, color: Color = Color("#ededeb")) -> void:
 	draw_string_outline(font, point, value, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size, 3, Color(0, 0, 0, 0.7))
 	draw_string(font, point, value, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size, color)
+

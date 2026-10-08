@@ -97,6 +97,11 @@ var sample_timer := 0.0
 var sample_lines: PackedStringArray = []
 var report_warnings: PackedStringArray = []
 var report_dialog: FileDialog
+var event_autopilot := false
+var event_low_battery := false
+var event_empty_battery := false
+var event_precip := 0
+var event_turbulence := false
 var home_position := Vector3.ZERO
 var route_points: Array[Vector3] = []
 var interface_hud: Control
@@ -155,6 +160,22 @@ func _physics_process(delta: float) -> void:
 		_log("Взлёт")
 	if had_motors and not craft.motors_on:
 		_log("Посадка")
+	if craft.autopilot_on != event_autopilot:
+		_log("Срабатывание автопилота" if craft.autopilot_on else "Отключение автопилота")
+		event_autopilot = craft.autopilot_on
+	if craft.battery <= 0.15 and not event_low_battery:
+		_log("Низкий заряд батареи: %.0f%%" % (craft.battery * 100.0))
+		event_low_battery = true
+	if craft.battery <= 0.02 and not event_empty_battery:
+		_log("Батарея села. Моторы выключены")
+		event_empty_battery = true
+	if precip != event_precip:
+		if precip != 0:
+			_log("Начало осадков: " + _precip_name())
+		event_precip = precip
+	if turbulence_on != event_turbulence:
+		_log("Турбулентность: " + ("включена" if turbulence_on else "отключена"))
+		event_turbulence = turbulence_on
 	if craft.warning != "" and not warned:
 		_log(craft.warning)
 		warned = true
@@ -554,6 +575,11 @@ func _start_flight() -> void:
 	warned = false
 	log_lines.clear()
 	report_warnings.clear()
+	event_autopilot = false
+	event_low_battery = false
+	event_empty_battery = false
+	event_precip = precip
+	event_turbulence = turbulence_on
 	flight_seconds = 0.0
 	max_altitude = 0.0
 	max_speed = 0.0

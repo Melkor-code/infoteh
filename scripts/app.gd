@@ -433,18 +433,16 @@ func _build_ui() -> void:
 	layer.add_child(flight_panel)
 	var flight_box := HBoxContainer.new()
 	flight_box.add_theme_constant_override("separation", 6)
+	flight_box.custom_minimum_size.y = 30
+	flight_box.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	flight_panel.add_child(flight_box)
 	var camera_cycle := Button.new()
 	camera_cycle.text = "Камера [C]"
-	camera_cycle.custom_minimum_size.y = 28
-	camera_cycle.add_theme_font_size_override("font_size", 11)
 	camera_cycle.focus_mode = Control.FOCUS_NONE
 	camera_cycle.pressed.connect(_cycle_camera)
 	flight_box.add_child(camera_cycle)
 	var pause_button := Button.new()
 	pause_button.text = "Пауза [ESC]"
-	pause_button.custom_minimum_size.y = 28
-	pause_button.add_theme_font_size_override("font_size", 11)
 	pause_button.focus_mode = Control.FOCUS_NONE
 	pause_button.pressed.connect(_toggle_pause)
 	flight_box.add_child(pause_button)
@@ -481,15 +479,11 @@ func _build_ui() -> void:
 	flight_box.add_child(right_spacer)
 	var menu_button := Button.new()
 	menu_button.text = "Меню"
-	menu_button.custom_minimum_size.y = 28
-	menu_button.add_theme_font_size_override("font_size", 11)
 	menu_button.focus_mode = Control.FOCUS_NONE
 	menu_button.pressed.connect(_back_to_menu)
 	flight_box.add_child(menu_button)
 	var report := Button.new()
 	report.text = "Отчёт"
-	report.custom_minimum_size.y = 28
-	report.add_theme_font_size_override("font_size", 11)
 	report.focus_mode = Control.FOCUS_NONE
 	report.pressed.connect(_save_log)
 	flight_box.add_child(report)
@@ -1342,9 +1336,8 @@ func _toggle_button(text: String, tip: String) -> Button:
 	button.text = text
 	button.tooltip_text = tip
 	button.focus_mode = Control.FOCUS_NONE
-	button.custom_minimum_size = Vector2(0, 28)
-	button.add_theme_font_size_override("font_size", 11)
-	button.add_theme_constant_override("h_separation", 3)
+	button.custom_minimum_size = Vector2(72, 22)
+	button.add_theme_font_size_override("font_size", 13)
 	return button
 
 

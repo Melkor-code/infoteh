@@ -209,6 +209,7 @@ func _sync_surface() -> void:
 
 
 func _process(_delta: float) -> void:
+	_refresh_time_labels()
 	if paused:
 		flight_panel.hide()
 		return
@@ -1270,6 +1271,8 @@ func _wind_slider() -> HBoxContainer:
 	slider.value_changed.connect(func(value: float) -> void:
 		wind_speed = value
 		_refresh_wind_labels()
+		if flying:
+			_log("Изменение ветра: %.0f м/с, направление %s" % [wind_speed, _wind_from_name()])
 	)
 	wind_sliders.append(slider)
 	box.add_child(slider)
@@ -1291,6 +1294,8 @@ func _wind_direction_picker() -> OptionButton:
 	picker.item_selected.connect(func(index: int) -> void:
 		wind_from = index
 		_refresh_wind_dirs()
+		if flying:
+			_log("Изменение ветра: %.0f м/с, направление %s" % [wind_speed, _wind_from_name()])
 	)
 	wind_pickers.append(picker)
 	return picker
@@ -1312,6 +1317,19 @@ func _refresh_wind_labels() -> void:
 	for slider in wind_sliders:
 		if absf(slider.value - wind_speed) > 0.01:
 			slider.set_value_no_signal(wind_speed)
+
+
+func _refresh_time_labels() -> void:
+	if day_night == null:
+		return
+	var text := day_night.clock_text()
+	for clock in clock_labels:
+		clock.text = text
+	for slider in hour_sliders:
+		if absf(slider.value - day_night.hour) > 0.01:
+			slider.set_value_no_signal(day_night.hour)
+	for button in cycle_buttons:
+		button.set_pressed_no_signal(day_night.cycling)
 
 
 func _toggle_button(text: String, tip: String) -> Button:
@@ -1387,7 +1405,10 @@ func _time_controls() -> VBoxContainer:
 	slider.step = 0.25
 	slider.value = day_night.hour if day_night != null else 12.0
 	slider.custom_minimum_size = Vector2(150, 16)
-	slider.value_changed.connect(func(value: float) -> void: day_night.hour = value)
+	slider.value_changed.connect(func(value: float) -> void:
+		day_night.hour = value
+		_refresh_time_labels()
+	)
 	hour_sliders.append(slider)
 	row.add_child(slider)
 	var clock := Label.new()
@@ -1407,7 +1428,10 @@ func _time_controls() -> VBoxContainer:
 		var button := Button.new()
 		button.text = pair[0]
 		button.focus_mode = Control.FOCUS_NONE
-		button.pressed.connect(func() -> void: day_night.hour = pair[1])
+		button.pressed.connect(func() -> void:
+			day_night.hour = pair[1]
+			_refresh_time_labels()
+		)
 		quick.add_child(button)
 	box.add_child(quick)
 	return box

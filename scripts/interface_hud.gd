@@ -128,9 +128,9 @@ func _draw_map(rect: Rect2, s: float) -> void:
 	draw_polyline(arrow, Color.WHITE, 2 * s, true)
 	var legend := rect.position + Vector2(12, 250) * s
 	draw_rect(Rect2(legend + Vector2(4, -9) * s, Vector2(8, 8) * s), Color("#5fefff"), false, 2 * s)
-	_text("Старт", legend + Vector2(18, 0) * s, int(11 * s))
 	draw_rect(Rect2(legend + Vector2(90, -9) * s, Vector2(8, 8) * s), Color("#173f34"))
-	_text("Лес", legend + Vector2(104, 0) * s, int(11 * s), Color("#70b596"))
+	_map_label("СТАРТ", legend + Vector2(18, 0) * s, Color("#5fefff"), s)
+	_map_label("ЛЕС", legend + Vector2(104, 0) * s, Color("#70b596"), s)
 
 func _draw_osd(view: Vector2, s: float) -> void:
 	var center := view * 0.5

@@ -188,6 +188,9 @@ func _sync_surface() -> void:
 
 
 func _process(_delta: float) -> void:
+	if paused:
+		flight_panel.hide()
+		return
 	if field != null:
 		field.advance_weather(precip == 2, _delta)
 		field.set_foliage_wind(_wind_vector() + gust, field.snow_cover)
@@ -222,6 +225,10 @@ func _process(_delta: float) -> void:
 
 
 func _unhandled_input(event: InputEvent) -> void:
+	if report_dialog != null and report_dialog.visible:
+		return
+	if paused and not (event is InputEventKey and event.keycode == KEY_ESCAPE):
+		return
 	if event is InputEventMouseMotion and Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT):
 		orbit_yaw -= event.relative.x * 0.005
 		orbit_pitch = clampf(orbit_pitch - event.relative.y * 0.004, -1.2, -0.05)
@@ -828,6 +835,15 @@ func _report_conclusion(profile: Dictionary, described: Dictionary) -> String:
 
 
 func _save_log() -> void:
+	if flying:
+		paused = true
+		pause_panel.hide()
+		flight_panel.hide()
+		interface_hud.hide()
+		mouse_stick = false
+		mouse_pitch = 0.0
+		mouse_roll = 0.0
+	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 	if report_dialog == null:
 		report_dialog = FileDialog.new()
 		report_dialog.file_mode = FileDialog.FILE_MODE_OPEN_DIR
@@ -835,6 +851,7 @@ func _save_log() -> void:
 		report_dialog.title = "Выберите папку для отчёта"
 		report_dialog.ok_button_text = "Выбрать папку"
 		report_dialog.dir_selected.connect(_write_report)
+		report_dialog.canceled.connect(_report_closed)
 		add_child(report_dialog)
 	report_dialog.popup_centered_ratio(0.72)
 	return
@@ -843,89 +860,46 @@ func _save_log() -> void:
 func _write_report(folder: String) -> void:
 	if craft != null and sample_lines.is_empty():
 		_take_sample()
-	var text_path := folder.path_join("отчёт_полёта.txt")
-	var table_path := folder.path_join("телеметрия_полёта.csv")
 	var html_path := folder.path_join("графики_полёта.html")
 	var events_path := folder.path_join("журнал_событий.txt")
-	var text_file := FileAccess.open(text_path, FileAccess.WRITE)
-	if text_file == null:
-		status_flash = "Не удалось записать отчёт."
-		status_flash_time = 4.0
-		return
-	var profile: Dictionary = library.profiles[selected]
-	var described := FlightModel.describe(profile)
-	var lines: PackedStringArray = []
-	lines.append("Отчёт полёта")
-	lines.append("Учебная модель. Не официальная модель производителя и не лётное испытание.")
-	var disclaimer := str(profile.get("disclaimer", ""))
-	if disclaimer != "":
-		lines.append(disclaimer)
-	lines.append("Аппарат: " + str(profile.get("display_name", "")))
-	lines.append("Масса: " + _tagged_number(profile.get("mass_kg"), "%.3f", "кг"))
-	lines.append("Паспортная скорость: " + _tagged_number(profile.get("max_airspeed_m_s"), "%.1f", "м/с"))
-	lines.append("Запас тяги: 2 веса. В паспортах тяги нет, это общее допущение модели.")
-	if bool(described.get("limited_by_passport_speed", false)):
-		lines.append("Сопротивление подогнано под паспортную скорость. Множитель %.1f — допущение." % float(described.get("drag_scale", 1.0)))
-	lines.append("Местность: " + _terrain_name())
-	lines.append("Ветер: %.0f м/с, откуда %s" % [wind_speed, _wind_from_name()])
-	lines.append("Осадки: " + _precip_name())
-	lines.append("Температура воздуха: %.0f °C" % air_temp)
-	lines.append("Плотность воздуха: %.3f кг/м³" % FlightModel.air_density(air_temp))
-	lines.append("Турбулентность: " + ("да" if turbulence_on else "нет"))
-	lines.append("Время в полёте: %.0f с" % flight_seconds)
-	lines.append("Максимальная высота над поверхностью: %.1f м" % max_altitude)
-	lines.append("Максимальная скорость: %.1f м/с" % max_speed)
-	lines.append("Максимальный наклон модели: %.0f°" % max_tilt_deg)
-	lines.append("Минимальный заряд: %.0f%%" % min_battery)
-	lines.append("Минимальный сигнал: %.0f%%" % min_signal)
-	lines.append("Максимальная температура моторов: %.0f °C" % max_motor_temp)
-	lines.append("Вывод: " + _report_conclusion(profile, described))
-	lines.append("Сообщения и рекомендации:")
-	if report_warnings.is_empty():
-		lines.append("- нет")
-	else:
-		for item in report_warnings:
-			lines.append("- " + item)
-	lines.append("Таблица: телеметрия_полёта.csv. Точка измерения — примерно раз в секунду, разделитель — точка с запятой.")
-	lines.append("Графики: графики_полёта.html. Все подписи и единицы измерения указаны на русском языке.")
-	if sample_lines.size() >= 1200:
-		lines.append("Таблица обрезана: записаны первые 20 минут.")
-	lines.append("")
-	lines.append("Журнал:")
-	for event_line in log_lines:
-		if event_line.strip_edges() != "":
-			lines.append(event_line)
-	text_file.store_string("\n".join(lines))
-	text_file.close()
-	var table := FileAccess.open(table_path, FileAccess.WRITE)
-	if table == null:
-		status_flash = "Текст записан, таблицу записать не удалось."
-		status_flash_time = 5.0
-		return
-	table.store_line("время_с;высота_м;скорость_м_с;крен_град;тангаж_град;курс_град;заряд_проц;температура_моторов_град;сигнал_проц;тяга_проц;ветер_м_с;порывы_м_с")
-	for row in sample_lines:
-		table.store_line(row)
-	table.close()
+	var failed := PackedStringArray()
 	var events_file := FileAccess.open(events_path, FileAccess.WRITE)
-	if events_file != null:
+	if events_file == null:
+		failed.append("журнал событий")
+	else:
 		for event_line in log_lines:
 			if event_line.strip_edges() != "":
 				events_file.store_line(event_line)
+		if events_file.get_error() != OK:
+			failed.append("журнал событий")
 		events_file.close()
 	var html_file := FileAccess.open(html_path, FileAccess.WRITE)
-	if html_file != null:
+	if html_file == null:
+		failed.append("графики")
+	else:
 		html_file.store_string(_report_html())
+		if html_file.get_error() != OK:
+			failed.append("графики")
 		html_file.close()
-	status_flash = "Отчёт, таблица и графики сохранены: " + folder
+	status_flash = "Графики и журнал сохранены: " + folder if failed.is_empty() else "Не удалось сохранить: " + ", ".join(failed)
 	status_flash_time = 8.0
+	_report_closed()
+
+
+func _report_closed() -> void:
+	# Выбор папки и отмена не возобновляют полёт без команды пользователя.
+	if flying and paused:
+		pause_panel.show()
 
 
 func _chart_svg(title: String, column: int, unit: String, color: String) -> String:
 	var values: Array[float] = []
+	var times: Array[float] = []
 	for row in sample_lines:
 		var fields := row.split(";")
 		if column < fields.size():
 			values.append(float(fields[column]))
+			times.append(float(fields[0]))
 	if values.is_empty():
 		return "<section><h2>" + title + "</h2><p>Нет данных</p></section>"
 	var low := values[0]
@@ -933,17 +907,32 @@ func _chart_svg(title: String, column: int, unit: String, color: String) -> Stri
 	for value in values:
 		low = minf(low, value)
 		high = maxf(high, value)
-	var span := maxf(high - low, 0.001)
+	# Постоянный параметр тоже имеет читаемую шкалу.
+	var padding := maxf((high - low) * 0.08, 1.0)
+	low -= padding
+	high += padding
+	var span := high - low
+	var start := times[0]
+	var finish := maxf(times[-1], start + 1.0)
 	var points := PackedStringArray()
 	for i in values.size():
-		var x := 40.0 + 700.0 * float(i) / maxf(values.size() - 1, 1)
-		var y := 180.0 - 140.0 * (values[i] - low) / span
+		var x := 85.0 + 650.0 * (times[i] - start) / (finish - start)
+		var y := 235.0 - 190.0 * (values[i] - low) / span
 		points.append("%.1f,%.1f" % [x, y])
-	return "<section><h2>%s</h2><svg viewBox='0 0 780 220' role='img' aria-label='%s'>" % [title, title] + \
-		"<line x1='40' y1='180' x2='740' y2='180' stroke='#7b8794'/><line x1='40' y1='40' x2='40' y2='180' stroke='#7b8794'/>" + \
-		"<polyline fill='none' stroke='%s' stroke-width='3' points='%s'/>" % [color, " ".join(points)] + \
-		"<text x='46' y='34'>макс. %.2f %s</text><text x='46' y='205'>мин. %.2f %s</text>" % [high, unit, low, unit] + \
-		"</svg></section>"
+	var svg := "<section><h2>%s</h2><svg viewBox='0 0 780 300' role='img' aria-label='%s'>" % [title, title]
+	svg += "<text x='85' y='22'>%s (%s)</text>" % [title, unit]
+	for i in range(6):
+		var y := 235.0 - 190.0 * float(i) / 5.0
+		var value := low + span * float(i) / 5.0
+		svg += "<line x1='85' y1='%.1f' x2='735' y2='%.1f' stroke='#dce3ea'/><text x='75' y='%.1f' text-anchor='end'>%.2f</text>" % [y, y, y + 4.0, value]
+		var x := 85.0 + 650.0 * float(i) / 5.0
+		var seconds := start + (finish - start) * float(i) / 5.0
+		svg += "<line x1='%.1f' y1='45' x2='%.1f' y2='235' stroke='#dce3ea'/><text x='%.1f' y='256' text-anchor='middle'>%.1f</text>" % [x, x, x, seconds]
+	svg += "<text x='410' y='283' text-anchor='middle'>Время полёта (с)</text>"
+	svg += "<polyline fill='none' stroke='%s' stroke-width='2.5' points='%s'/>" % [color, " ".join(points)]
+	if values.size() == 1:
+		svg += "<circle cx='85' cy='140' r='4' fill='%s'/>" % color
+	return svg + "</svg></section>"
 
 
 func _report_html() -> String:

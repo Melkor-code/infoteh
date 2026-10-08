@@ -83,8 +83,8 @@ func _draw_warning(value: String, y: float, s: float, view_width: float) -> void
 	var point := Vector2(24 * s, y + 17 * s)
 	draw_circle(point, 5.0 * s, Color("#650f1a"))
 	draw_circle(point, 3.5 * s, Color("#ff5d67"))
-	draw_string_outline(font, point + Vector2(14, 5) * s, value, HORIZONTAL_ALIGNMENT_LEFT, -1, int(13 * s), 3, Color(0, 0, 0, 0.9))
-	draw_string(font, point + Vector2(14, 5) * s, value, HORIZONTAL_ALIGNMENT_LEFT, -1, int(13 * s), Color("#ffb8bc"))
+	draw_string_outline(font, point + Vector2(15, 6) * s, value, HORIZONTAL_ALIGNMENT_LEFT, -1, int(15 * s), 3, Color(0, 0, 0, 0.9))
+	draw_string(font, point + Vector2(15, 6) * s, value, HORIZONTAL_ALIGNMENT_LEFT, -1, int(15 * s), Color("#ffb8bc"))
 
 
 func _draw_map(rect: Rect2, s: float) -> void:

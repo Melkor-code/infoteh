@@ -1406,8 +1406,7 @@ func _time_controls() -> VBoxContainer:
 	slider.value = day_night.hour if day_night != null else 12.0
 	slider.custom_minimum_size = Vector2(150, 16)
 	slider.value_changed.connect(func(value: float) -> void:
-		day_night.hour = value
-		_refresh_time_labels()
+		_set_time_of_day(value)
 	)
 	hour_sliders.append(slider)
 	row.add_child(slider)
@@ -1429,12 +1428,20 @@ func _time_controls() -> VBoxContainer:
 		button.text = pair[0]
 		button.focus_mode = Control.FOCUS_NONE
 		button.pressed.connect(func() -> void:
-			day_night.hour = pair[1]
-			_refresh_time_labels()
+			_set_time_of_day(pair[1])
 		)
 		quick.add_child(button)
 	box.add_child(quick)
 	return box
+
+
+func _set_time_of_day(value: float) -> void:
+	if day_night == null:
+		return
+	day_night.hour = fposmod(value, 24.0)
+	# Применяем освещение сразу, в том числе когда симуляция стоит на паузе.
+	day_night.update(0.0)
+	_refresh_time_labels()
 
 
 func _toggle_forces() -> void:

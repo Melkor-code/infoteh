@@ -69,6 +69,15 @@ func _map_label(value: String, point: Vector2, color: Color, s: float) -> void:
 	draw_string(font, point, value, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, Color.WHITE)
 
 
+func _legend_item(value: String, point: Vector2, color: Color, s: float) -> void:
+	var fs := int(9 * s)
+	var marker := Rect2(point + Vector2(0, -8) * s, Vector2(7, 7) * s)
+	draw_rect(marker, color)
+	draw_rect(marker, Color(0.82, 0.9, 0.95, 0.85), false, maxf(s, 1.0))
+	draw_string_outline(font, point + Vector2(12, 0) * s, value, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, 1, Color(0, 0, 0, 0.9))
+	draw_string(font, point + Vector2(12, 0) * s, value, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, Color("#dce7ef"))
+
+
 func _draw_map(rect: Rect2, s: float) -> void:
 	_text("ОСТРОВ  /  СЕВЕР ↑", rect.position + Vector2(12, 22) * s, int(13 * s), Color("#e5edf7"))
 	var area := Rect2(rect.position + Vector2(12, 34) * s, Vector2(276, 176) * s)
@@ -103,10 +112,11 @@ func _draw_map(rect: Rect2, s: float) -> void:
 		var triangle := PackedVector2Array([peak + Vector2(-14, 10) * s, peak + Vector2(0, -16) * s, peak + Vector2(16, 10) * s])
 		draw_colored_polygon(triangle, Color("#795b4c"))
 		draw_polyline(PackedVector2Array([triangle[0], triangle[1], triangle[2], triangle[0]]), Color("#d8aa86"), 1.5 * s, true)
-	_map_label("ОЗЕРО", rect.position + Vector2(12, 230) * s, Color("#86eaff"), s)
-	_map_label("ГОРОД", rect.position + Vector2(76, 230) * s, Color("#e2edf7"), s)
-	_map_label("ПОЛИГОН", rect.position + Vector2(145, 230) * s, Color("#ffdd55"), s)
-	_map_label("ГОРЫ", rect.position + Vector2(230, 230) * s, Color("#e7b08c"), s)
+	# Компактная легенда под картой: одна высота и единый размер подписей.
+	_legend_item("Озеро", rect.position + Vector2(12, 230) * s, Color("#087fc8"), s)
+	_legend_item("Город", rect.position + Vector2(76, 230) * s, Color("#8b9cae"), s)
+	_legend_item("Полигон", rect.position + Vector2(145, 230) * s, Color("#d19b18"), s)
+	_legend_item("Горы", rect.position + Vector2(230, 230) * s, Color("#795b4c"), s)
 	var route: Array = snapshot.get("route", [])
 	if route.size() > 1:
 		var path := PackedVector2Array()
@@ -127,10 +137,8 @@ func _draw_map(rect: Rect2, s: float) -> void:
 	draw_polyline(arrow, Color("#071019"), 5 * s, true)
 	draw_polyline(arrow, Color.WHITE, 2 * s, true)
 	var legend := rect.position + Vector2(12, 250) * s
-	draw_rect(Rect2(legend + Vector2(4, -9) * s, Vector2(8, 8) * s), Color("#5fefff"), false, 2 * s)
-	draw_rect(Rect2(legend + Vector2(90, -9) * s, Vector2(8, 8) * s), Color("#173f34"))
-	_map_label("СТАРТ", legend + Vector2(18, 0) * s, Color("#5fefff"), s)
-	_map_label("ЛЕС", legend + Vector2(104, 0) * s, Color("#70b596"), s)
+	_legend_item("Старт", legend, Color("#5fefff"), s)
+	_legend_item("Лес", legend + Vector2(90, 0) * s, Color("#173f34"), s)
 
 func _draw_osd(view: Vector2, s: float) -> void:
 	var center := view * 0.5

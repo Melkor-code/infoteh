@@ -1,0 +1,108 @@
+{
+  "id": "dji_phantom_4_pro",
+  "display_name": "DJI Phantom 4 Pro",
+  "disclaimer": "Не официальная модель DJI. Масса 1388 г взята из спецификации и не округлена до 1,5 кг.",
+  "mass_kg": {
+    "value": 1.388,
+    "origin": "passport",
+    "source": "https://www.dji.com/support/product/phantom-4-pro",
+    "comment": "Weight (Battery & Propellers Included): 1388 g. Это ближайший известный гражданский аппарат к запросу «около 1,5 кг» с полной открытой спецификацией."
+  },
+  "dimensions_m": {
+    "diagonal_without_propellers": {
+      "value": 0.35,
+      "origin": "passport",
+      "source": "https://www.dji.com/support/product/phantom-4-pro",
+      "comment": "Diagonal Size (Propellers Excluded): 350 mm. Это расстояние между моторами по диагонали, не ширина корпуса."
+    },
+    "width": {
+      "value": 0.289,
+      "origin": "assumption",
+      "source": "https://www.dji.com/support/product/phantom-4-pro",
+      "comment": "Ширину корпуса DJI на этой странице не даёт. Для сопротивления временно берём 0,289 м: диагональ моторов, делённая на корень из 2, как будто лучи под 90°. Это оценка, не паспорт."
+    },
+    "height": {
+      "value": 0.18,
+      "origin": "assumption",
+      "source": "",
+      "comment": "Высоты на открытой странице спецификации нет. 0,18 м — временная оценка порядка корпуса Phantom, чтобы площадь не была нулевой. Перед защитой заменить на число из руководства, если найдём, и сменить origin на passport."
+    },
+    "length": {
+      "value": 0.289,
+      "origin": "assumption",
+      "source": "https://www.dji.com/support/product/phantom-4-pro",
+      "comment": "Та же оценка, что и ширина: из диагонали 350 мм."
+    }
+  },
+  "propeller_diameter_m": {
+    "value": null,
+    "origin": "missing",
+    "source": "https://www.dji.com/support/product/phantom-4-pro",
+    "comment": "На странице спецификации диаметра винта нет. Не подставляем магазинное число, пока не откроем руководство."
+  },
+  "battery": {
+    "capacity_mah": {
+      "value": 5870,
+      "origin": "passport",
+      "source": "https://www.dji.com/support/product/phantom-4-pro",
+      "comment": "Intelligent Flight Battery, 5870 mAh."
+    },
+    "voltage_v": {
+      "value": 15.2,
+      "origin": "passport",
+      "source": "https://www.dji.com/support/product/phantom-4-pro",
+      "comment": "15.2 V, LiPo 4S."
+    },
+    "cells": {
+      "value": 4,
+      "origin": "passport",
+      "source": "https://www.dji.com/support/product/phantom-4-pro",
+      "comment": "LiPo 4S."
+    }
+  },
+  "max_airspeed_m_s": {
+    "value": 20.0,
+    "origin": "passport",
+    "source": "https://www.dji.com/support/product/phantom-4-pro",
+    "comment": "Max Speed, S-mode: 72 kph = 20 м/с."
+  },
+  "max_wind_m_s": {
+    "value": 10.0,
+    "origin": "passport",
+    "source": "https://www.dji.com/support/product/phantom-4-pro",
+    "comment": "Max Wind Speed Resistance: 10 m/s. В демонстрационном ветре 7 м/с этот аппарат ещё внутри паспорта."
+  },
+  "operating_temperature_c": {
+    "min": 0,
+    "max": 40,
+    "origin": "passport",
+    "source": "https://www.dji.com/support/product/phantom-4-pro",
+    "comment": "0° to 40°C."
+  },
+  "flight_time_s": {
+    "value": 1800,
+    "origin": "passport",
+    "source": "https://www.dji.com/support/product/phantom-4-pro",
+    "comment": "Approx. 30 minutes. Паспортный потолок в штиль, не результат нашего расчёта батареи."
+  },
+  "camera_fov_deg": {
+    "value": 84,
+    "origin": "passport",
+    "source": "https://www.dji.com/support/product/phantom-4-pro",
+    "comment": "Lens FOV 84°. Для конуса камеры. У двух Пионеров такого поля в уже открытых карточках нет, поэтому там поле не ставим."
+  },
+  "drag": {
+    "cd": {
+      "value": 1.0,
+      "origin": "assumption",
+      "source": "",
+      "comment": "В паспорте нет. Тот же коэффициент, что у лёгких моделей: сравниваем размер и массу, а не выдуманную обтекаемость."
+    },
+    "box_fill": {
+      "value": 0.35,
+      "origin": "assumption",
+      "source": "",
+      "comment": "Доля прямоугольника ширина×высота."
+    }
+  }
+}

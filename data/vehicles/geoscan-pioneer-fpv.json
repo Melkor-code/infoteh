@@ -1,0 +1,110 @@
+{
+  "id": "geoscan_pioneer_fpv",
+  "display_name": "Геоскан Пионер FPV",
+  "disclaimer": "Не официальная модель Геоскана. Масса в паспорте указана как «до 500 г», поэтому в расчёте берём верхнюю границу, а не выдуманные 500,0 г «ровно».",
+  "mass_kg": {
+    "value": 0.5,
+    "origin": "passport",
+    "source": "https://download.geoscan.ru/pioneer/upload/Docs/Geoscan-Pioneer-FPV-characteristics.pdf?v3",
+    "comment": "Вес в сборе с АКБ: до 500 г. Отдельной точной массы PDF не даёт."
+  },
+  "dimensions_m": {
+    "length": {
+      "value": 0.18,
+      "origin": "passport",
+      "source": "https://download.geoscan.ru/pioneer/upload/Docs/Geoscan-Pioneer-FPV-characteristics.pdf?v3",
+      "comment": "Размеры в сборе 180×180×75 мм."
+    },
+    "width": {
+      "value": 0.18,
+      "origin": "passport",
+      "source": "https://download.geoscan.ru/pioneer/upload/Docs/Geoscan-Pioneer-FPV-characteristics.pdf?v3",
+      "comment": "180 мм."
+    },
+    "height": {
+      "value": 0.075,
+      "origin": "passport",
+      "source": "https://download.geoscan.ru/pioneer/upload/Docs/Geoscan-Pioneer-FPV-characteristics.pdf?v3",
+      "comment": "75 мм."
+    }
+  },
+  "propeller_diameter_m": {
+    "value": 0.0787,
+    "origin": "passport",
+    "source": "https://download.geoscan.ru/pioneer/upload/Docs/Geoscan-Pioneer-FPV-characteristics.pdf?v3",
+    "comment": "Диаметр воздушных винтов 78,7 мм, 4 штуки."
+  },
+  "motors": {
+    "kv": {
+      "value": 3400,
+      "origin": "passport",
+      "source": "https://download.geoscan.ru/pioneer/upload/Docs/Geoscan-Pioneer-FPV-characteristics.pdf?v3",
+      "comment": "Бесколлекторные, 3400 KV. KV — обороты на вольт без нагрузки, не тяга."
+    }
+  },
+  "battery": {
+    "capacity_mah": {
+      "value": 1550,
+      "origin": "passport",
+      "source": "https://download.geoscan.ru/pioneer/upload/Docs/Geoscan-Pioneer-FPV-characteristics.pdf?v3",
+      "comment": "1550 мА·ч."
+    },
+    "voltage_v": {
+      "value": 14.8,
+      "origin": "passport",
+      "source": "https://download.geoscan.ru/pioneer/upload/Docs/Geoscan-Pioneer-FPV-characteristics.pdf?v3",
+      "comment": "Номинальное напряжение 14,8 В."
+    },
+    "cells": {
+      "value": 4,
+      "origin": "passport",
+      "source": "https://download.geoscan.ru/pioneer/upload/Docs/Geoscan-Pioneer-FPV-characteristics.pdf?v3",
+      "comment": "LiPo 4S."
+    }
+  },
+  "max_airspeed_m_s": {
+    "value": 18.06,
+    "origin": "passport",
+    "source": "https://geoscan.education/pioneer-fpv",
+    "comment": "На странице производителя скорость до 65 км/ч. В PDF характеристик этого пункта нет, поэтому источник — страница, не PDF. 65 / 3.6 ≈ 18,06 м/с. У части магазинов указано 100 км/ч; это число не используем."
+  },
+  "max_wind_m_s": {
+    "value": null,
+    "origin": "missing",
+    "source": "https://download.geoscan.ru/pioneer/upload/Docs/Geoscan-Pioneer-FPV-characteristics.pdf?v3",
+    "comment": "Допустимого ветра ни в PDF, ни на открытой карточке нет. Не подставляем чужое число."
+  },
+  "operating_temperature_c": {
+    "min": -10,
+    "max": 40,
+    "origin": "passport",
+    "source": "https://download.geoscan.ru/pioneer/upload/Docs/Geoscan-Pioneer-FPV-characteristics.pdf?v3",
+    "comment": "От −10 до +40 °C."
+  },
+  "flight_time_s": {
+    "value": 480,
+    "origin": "passport",
+    "source": "https://download.geoscan.ru/pioneer/upload/Docs/Geoscan-Pioneer-FPV-characteristics.pdf?v3",
+    "comment": "Максимальная продолжительность полёта 8 мин."
+  },
+  "camera_fov_deg": {
+    "value": 120,
+    "origin": "assumption",
+    "source": "",
+    "comment": "В открытых карточке и PDF угла обзора нет. 120° — условный широкий угол FPV-камеры для конуса, не паспорт и не тяга."
+  },
+  "drag": {
+    "cd": {
+      "value": 1.0,
+      "origin": "assumption",
+      "source": "",
+      "comment": "В паспорте нет. То же типовое значение, что у остальных моделей."
+    },
+    "box_fill": {
+      "value": 0.35,
+      "origin": "assumption",
+      "source": "",
+      "comment": "Доля прямоугольника ширина×высота. Защиту винтов отдельной формой не считаем."
+    }
+  }
+}

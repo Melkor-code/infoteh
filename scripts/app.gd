@@ -389,7 +389,7 @@ func _build_ui() -> void:
 	menu_box.add_child(detail_label)
 	if library.errors.size() > 0:
 		menu_box.add_child(_hint("Ошибки чтения: " + "\n".join(library.errors)))
-	menu_box.add_child(_hint("Ветер: скорость и откуда дует. 7 м/с с северо-запада — пример из задания."))
+	menu_box.add_child(_hint("Ветер: скорость и откуда дует."))
 	menu_box.add_child(_wind_slider())
 	menu_box.add_child(_hint("Местность"))
 	menu_box.add_child(_terrain_picker())

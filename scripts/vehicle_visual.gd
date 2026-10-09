@@ -1,6 +1,6 @@
 extends Node3D
 
-## Imported artwork stays separate from the flight state. Bounds are in metres.
+## Визуальная модель подгоняется по размерам профиля, но не меняет массу и состояние полёта. Границы измеряются в метрах.
 var rotors: Array[Node3D] = []
 var bounds := AABB()
 var loaded := false

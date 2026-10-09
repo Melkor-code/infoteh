@@ -12,7 +12,8 @@ const CD := 1.0
 const BOX_FILL := 0.35
 const THRUST_TO_WEIGHT := 2.0
 const CRUISE_TILT_DEG := 25.0
-# Осадки в паспортах не расписаны. Это допущения, и они разные, не одна и та же надбавка.
+# Масса, размеры и максимальная скорость приходят из паспортного JSON; тяговый запас и коэффициенты осадков — учебные допущения.
+# Запас тяги и +15% для дождя не являются измерениями производителя.
 const RAIN_DRAG := 1.15
 const SNOW_DRAG := 1.10
 const SNOW_THRUST := 0.92
@@ -35,7 +36,7 @@ static func read_number(node: Variant, fallback: float = 0.0) -> float:
 
 
 static func frontal_area(width: float, height: float) -> float:
-	# 0,35 — доля прямоугольника, которая реально встречает воздух.
+	# 0,35 — допущение о заполнении фронтальной площади, а не измерение корпуса.
 	# Минимум не даёт делению на ноль, если в файле пустая высота.
 	return maxf(BOX_FILL * width * height, 0.001)
 

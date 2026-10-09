@@ -87,6 +87,7 @@ func _draw_warning(value: String, y: float, s: float, view_width: float) -> void
 	draw_string(font, point + Vector2(16, 7) * s, value, HORIZONTAL_ALIGNMENT_LEFT, -1, int(17 * s), Color("#ffb8bc"))
 
 
+# Миникарта рисуется прямо на HUD-панели, поэтому не создаёт вторую 3D-сцену. Север сверху: в мире это направление минус Z.
 func _draw_map(rect: Rect2, s: float) -> void:
 	_text("ОСТРОВ  /  СЕВЕР ↑", rect.position + Vector2(12, 22) * s, int(13 * s), Color("#e5edf7"))
 	var area := Rect2(rect.position + Vector2(12, 34) * s, Vector2(276, 176) * s)

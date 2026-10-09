@@ -5,8 +5,8 @@ const VehicleVisual = preload("res://scripts/vehicle_visual.gd")
 const CanopyDrag = preload("res://scripts/canopy_drag.gd")
 
 ## Упрощённый квадрокоптер на этом шаге.
-## Четыре мотора свёрнуты в одну тягу и наклон корпуса. Этого хватает, чтобы
-## сравнить аппараты в ветре. Отдельные обороты моторов будут следующим шагом.
+## Четыре мотора свёрнуты в одну тягу и наклон корпуса: так проще воспроизводимо сравнивать профили в ветре.
+## Физика Godot с отдельными телами и контактами дала бы лишние неуправляемые силы; этот шаг явно задаёт тягу и сопротивление.
 ## Числа приходят из файла аппарата через FlightModel, здесь их нет.
 
 var profile: Dictionary = {}
@@ -64,6 +64,7 @@ var autopilot_position := Vector3.ZERO
 var autopilot_heading := 0.0
 var navigation_lights: Node3D
 
+# Автопилот удерживает запомненные точку и курс регулятором; возврата домой здесь нет, потому что отдельного маршрута в ТЗ не задано.
 func set_autopilot(on: bool) -> bool:
 	if on and (not motors_on or ditched or battery <= 0.02):
 		return false
@@ -207,7 +208,7 @@ func step(delta: float) -> void:
 	thrust_force = up * thrust
 	weight_force = Vector3(0.0, -mass * FlightModel.G, 0.0)
 	var air := velocity - wind
-	# Stable quadratic drag: exact dissipation over this substep, no reversal in gusts.
+	# Квадратичное сопротивление интегрируется за подшаг без разворота скорости порывом.
 	var free_velocity := velocity + (thrust_force + weight_force) / mass * delta
 	var relative := free_velocity - wind
 	var damped := relative / (1.0 + drag_k * relative.length() * delta / mass)
@@ -241,7 +242,7 @@ func step(delta: float) -> void:
 		velocity.z *= grip
 		if not motors_on:
 			velocity += slope_accel * delta
-			# Static friction holds a parked craft when aerodynamic load is small.
+			# Статическое трение удерживает остановившийся аппарат при малой аэродинамической нагрузке.
 			var lateral := Vector2(drag_force.x, drag_force.z).length()
 			if slope_accel.length() < 0.01 and lateral < mass * FlightModel.G * 0.8:
 				velocity.x = 0.0

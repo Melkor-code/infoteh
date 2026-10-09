@@ -3,7 +3,7 @@ extends Node3D
 const VehicleLibrary = preload("res://scripts/vehicle_library.gd")
 const Quadrotor = preload("res://scripts/quadrotor.gd")
 const FlightModel = preload("res://scripts/flight_model.gd")
-const RangeField = preload("res://scripts/island_field.gd")
+const IslandField = preload("res://scripts/island_field.gd")
 const FlightOverlay = preload("res://scripts/flight_overlay.gd")
 const DayNight = preload("res://scripts/day_night.gd")
 const FlightTrace = preload("res://scripts/flight_trace.gd")
@@ -130,11 +130,11 @@ func _physics_process(delta: float) -> void:
 	craft.air_temp = air_temp
 	craft.precip = precip
 	_sync_surface()
-	craft.water_surface = RangeField.WATER_Y
+	craft.water_surface = IslandField.WATER_Y
 	var was_airborne := craft.airborne
 	var had_motors := craft.motors_on
 	var hit := {"note": ""}
-	# At most half a body radius travelled per substep prevents thin-wall tunnelling.
+	# За один подшаг аппарат проходит не больше половины радиуса: это уменьшает риск пройти сквозь тонкую стену.
 	# Не допускаем спираль перегрузки: большой delta после просадки FPS не
 	# должен запускать десятки дополнительных физических подшагов.
 	var substeps := clampi(int(ceil(maxf(delta * 120.0, craft.velocity.length() * delta / maxf(craft.collision_radius * 0.5, 0.02)))), 1, 8)
@@ -144,7 +144,7 @@ func _physics_process(delta: float) -> void:
 		var contact: Dictionary = field.resolve(craft.position, craft.velocity, craft.collision_radius, craft.ground_clearance)
 		craft.position = contact["pos"]
 		craft.velocity = contact["vel"]
-		# Re-sample after moving horizontally: steep terrain must not lag by a tick.
+		# После горизонтального перемещения высота рельефа считывается заново, чтобы на склоне не было задержки на кадр.
 		_sync_surface()
 		if craft.surface_kind == 0 and craft.position.y < craft.surface_y + craft.ground_clearance:
 			craft.position.y = craft.surface_y + craft.ground_clearance
@@ -336,7 +336,7 @@ func _build_world() -> void:
 	trace = FlightTrace.new()
 	add_child(trace)
 
-	field = RangeField.new()
+	field = IslandField.new()
 	add_child(field)
 	field.build()
 
@@ -891,6 +891,7 @@ func _save_log() -> void:
 	return
 
 
+# Отчёт собирает журнал событий и графики в одном HTML: жюри может прочитать ход полёта, не разбирая служебные файлы.
 func _write_report(folder: String) -> void:
 	if craft != null and sample_lines.is_empty():
 		_take_sample()

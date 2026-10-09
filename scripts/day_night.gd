@@ -1,6 +1,6 @@
 extends Node3D
 
-# A complete cycle takes 12 real minutes; manual time remains available.
+# Полный цикл длится 12 реальных минут; ручная установка времени остаётся доступной. Изменение света и неба не меняет тягу.
 var hour := 12.0
 var cycling := false
 var cycle_seconds := 720.0

@@ -5,8 +5,8 @@ extends RefCounted
 ## Ветка делится надвое: одна прижата к направлению родителя, вторая — её отражение.
 ## Дальше отрезки короче и тоньше. На конце три карточки листвы, не зелёный цилиндр.
 ## В цвете вершины записано, насколько точку качает ветер: комель стоит, макушка ходит.
-## Правило развилки разобрано по gdTree3D (обёртка над proctree). Сетка написана здесь:
-## чужой .dll в проект не кладётся, иначе на части машин сцена не открывается.
+## Правило развилки записано здесь по мотивам gdTree3D (обёртка над proctree), чтобы результат был воспроизводимым.
+## Чужая библиотека и .dll в проект не входят: игра использует собственную сетку и локальные правила.
 
 
 static var _shader_res: Shader = null
@@ -362,7 +362,7 @@ static func _shader() -> Shader:
 	if _shader_res != null:
 		return _shader_res
 	var shader := Shader.new()
-	# Без DEPTH_TEXTURE: в Compatibility его нет. Листва режется формой, не текстурой.
+	# Без DEPTH_TEXTURE: в Compatibility его нет. Прозрачность листвы задаётся альфа-текстурой.
 	shader.code = """shader_type spatial;
 render_mode cull_disabled, depth_draw_opaque, specular_disabled;
 uniform sampler2D bark_texture : source_color, repeat_enable;

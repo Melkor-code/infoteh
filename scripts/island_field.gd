@@ -4,7 +4,7 @@ const FlightModel = preload("res://scripts/flight_model.gd")
 const ProcTree = preload("res://scripts/proc_tree.gd")
 const Contacts = preload("res://scripts/map_contacts.gd")
 
-# North is -Z. The layout follows the supplied overhead sketch.
+# Север в сцене — минус Z; расположение повторяет предоставленный план сверху.
 const WATER_Y := 0.0
 const SPAN := 800.0
 const CELLS := 320
@@ -60,7 +60,7 @@ func spawn_point(index: int) -> Vector3:
 	return SPAWNS[clampi(index, 0, SPAWNS.size() - 1)]
 
 func island_radius(x: float, z: float) -> float:
-	# Slightly irregular shoreline while keeping the oval silhouette of the plan.
+	# Берег слегка неровный, но сохраняет овальный силуэт плана.
 	var angle := atan2(z / 210.0, x / 310.0)
 	return Vector2(x / 310.0, z / 210.0).length() / (1.0 + 0.016 * sin(angle * 5.0) + 0.01 * cos(angle * 9.0))
 
@@ -97,7 +97,7 @@ func _grid_height(x: float, z: float) -> float:
 	return float(_height_cache[key])
 
 func sample_height(x: float, z: float) -> float:
-	# Paint and pad layers are elevated a few centimetres above the base mesh.
+	# Покрытие и площадка подняты на несколько сантиметров над базовой сеткой, чтобы не мерцать.
 	if Rect2(-21, -21, 42, 42).has_point(Vector2(x, z)):
 		return LAND_Y + 0.11
 	if Rect2(-113, -15, 10, 10).has_point(Vector2(x, z)):
@@ -132,8 +132,9 @@ func in_grove(pos: Vector3) -> bool:
 	return not CITY.grow(8).has_point(Vector2(pos.x, pos.z)) and not COURSE.grow(8).has_point(Vector2(pos.x, pos.z)) and island_radius(pos.x, pos.z) < 0.87 and lake_distance(pos.x, pos.z) > 14.0
 
 func resolve(pos: Vector3, vel: Vector3, radius: float, vertical_radius: float = -1.0) -> Dictionary:
+	# Выборка веток локальна; остальные статические препятствия проходят общий resolver без изменений.
 	# Статические объекты остаются в solids. Ветки ищутся только в соседних
-	# 16-метровых клетках, поэтому тысячи деревьев не перебираются каждый substep.
+	# 16-метровых клетках, поэтому тысячи деревьев не перебираются каждый подшаг.
 	var nearby: Array[Dictionary] = []
 	var min_cell := _tree_cell(Vector2(pos.x - TREE_QUERY_RADIUS, pos.z - TREE_QUERY_RADIUS))
 	var max_cell := _tree_cell(Vector2(pos.x + TREE_QUERY_RADIUS, pos.z + TREE_QUERY_RADIUS))
@@ -281,7 +282,7 @@ func _build_city() -> void:
 		for z in [-13.0, 13.0]:
 			_building(Vector3(x, 6.05, z), Vector3(17, _rng.randf_range(15, 34), 16), palette[index % 4])
 			index += 1
-	# Windows are one instanced draw, not hundreds of individual scene nodes.
+	# Окна рисуются одним инстансированным проходом, а не сотнями узлов сцены.
 	var window_mesh := BoxMesh.new()
 	window_mesh.size = Vector3.ONE
 	_multimesh(window_mesh, _paint(Color(0.075, 0.20, 0.27)), _windows, Vector3.ZERO, 900)
@@ -289,7 +290,7 @@ func _build_city() -> void:
 		for z in [-23.0, 23.0]:
 			_pole(Vector3(x, 8.6, z), 0.1, 5, Color(0.15, 0.18, 0.18))
 			_box(Vector3(x, 11.15, z), Vector3(0.7, 0.14, 0.7), Color(0.86, 0.84, 0.60))
-	# Pedestrian link between the city and the east entrance of the course.
+	# Проход соединяет город с восточным входом на полигон.
 	_box(Vector3(-83, 6.04, -10), Vector3(22, 0.06, 4), Color(0.62, 0.56, 0.40))
 
 func _building(base: Vector3, size: Vector3, color: Color) -> void:
@@ -307,7 +308,7 @@ func _building(base: Vector3, size: Vector3, color: Color) -> void:
 func _build_helipad() -> void:
 	_box(Vector3(0, 6.07, 0), Vector3(42, 0.025, 42), Color(0.09, 0.18, 0.18))
 	var white := Color(0.79, 0.83, 0.75)
-	# Flat painted landing circle and H, with an unobstructed centre.
+	# Плоская посадочная площадка с буквой H; центр оставлен свободным.
 	var ring := TorusMesh.new()
 	ring.inner_radius = 15.1
 	ring.outer_radius = 15.5
@@ -328,7 +329,7 @@ func _build_helipad() -> void:
 
 func _build_course() -> void:
 	_box(Vector3(-172, 6, -10), Vector3(156, 0.1, 60), Color(0.58, 0.49, 0.29))
-	# Eastern red point from the sketch: start facing west, into the course.
+	# Восточная красная точка из плана: старт смотрит на запад, в сторону полигона.
 	_box(Vector3(-108, 6.075, -10), Vector3(10, 0.03, 10), Color(0.14, 0.23, 0.22))
 	_box(Vector3(-108, 6.1, -10), Vector3(4, 0.015, 0.7), Color(0.91, 0.67, 0.18))
 	for i in 5:
@@ -336,14 +337,14 @@ func _build_course() -> void:
 		var center := Vector3(x, 10.0 + (i % 3) * 2.0, -19.0)
 		_ring(center, 2.8, 0.24, Color(0.84, 0.31 + i * 0.07, 0.12))
 		_pole(Vector3(x, (center.y - 2.8 + 6.05) * 0.5, -19), 0.12, center.y - 2.8 - 6.05, Color(0.2, 0.23, 0.24))
-	# Return lane: slalom, rectangular gates, then a low tunnel.
+	# Обратная полоса: слалом, прямоугольные ворота и низкий тоннель.
 	for i in 5:
 		_pole(Vector3(-231 + i * 12, 9.0, 4 + (i % 2) * 5), 0.45, 6, Color(0.77, 0.53, 0.13))
 	for x in [-161.0, -143.0]:
 		for z in [0.0, 10.0]:
 			_box(Vector3(x, 9, z), Vector3(0.5, 6, 0.5), Color(0.13, 0.38, 0.47), true)
 		_box(Vector3(x, 12.0, 5), Vector3(0.5, 0.5, 10.5), Color(0.13, 0.38, 0.47), true)
-	# Open tunnel assembled from rings; each rim is a physical obstacle.
+	# Открытый тоннель собран из колец; каждое кольцо является физическим препятствием.
 	for i in 9:
 		_ring(Vector3(-124 + i * 0.5, 8.5, 5), 2.2, 0.28, Color(0.34, 0.39, 0.40))
 	for x in range(-246, -115, 10):
@@ -378,11 +379,11 @@ func _label(text: String, pos: Vector3, height: float, angles: Vector3) -> Label
 	return label
 
 func _build_hill_sign() -> void:
-	# Real extruded Cyrillic letters, facing north towards the town.
+	# Объёмные кириллические буквы обращены на север, к городу.
 	var font := ThemeDB.fallback_font
 	for i in 4:
 		var x := 141.0 - i * 11.0
-		# Follow the same hillside contour so the word has a level baseline.
+		# Буквы повторяют контур склона, поэтому нижняя линия остаётся ровной.
 		var z := 40.0
 		while z < 115.0 and sample_height(x, z) < 23.0:
 			z += 0.25
@@ -430,6 +431,8 @@ func _forest_density(x: float, z: float) -> float:
 		density = maxf(density, 0.80)
 	return density
 
+# Деревья и трава объединяются в общие MultiMesh-группы: это сокращает число узлов и отрисовок.
+# Коллизии при этом хранятся отдельно и проверяются только в окрестности аппарата.
 func _build_nature() -> void:
 	var envelope_data: Dictionary = JSON.parse_string(FileAccess.get_file_as_string("res://assets/map/trees/envelopes.json"))
 	var buckets: Dictionary = {}

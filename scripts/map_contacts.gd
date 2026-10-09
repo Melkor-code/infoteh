@@ -1,5 +1,8 @@
 extends RefCounted
 
+## Контакт вычисляется пересечением с примитивом и нормалью, а не отдельным физическим телом на каждый элемент дерева.
+## Крона остаётся сопротивлением в canopy_drag.gd; здесь твёрдыми считаются ствол и достаточно толстые ветви.
+
 static func resolve(solids: Array, pos: Vector3, vel: Vector3, radius: float, vertical_radius: float = -1.0) -> Dictionary:
 	var note := ""
 	for _pass in 6:
@@ -25,7 +28,7 @@ static func resolve(solids: Array, pos: Vector3, vel: Vector3, radius: float, ve
 		if into < 0.0:
 			vel -= best_normal * into * (1.0 + restitution)
 			if foliage:
-				# A dissipative contact: tangential speed drops too, once on impact.
+				# При ударе уменьшается и касательная скорость: контакт гасит скольжение.
 				vel *= 0.65
 		note = best_note
 	return {"pos": pos, "vel": vel, "note": note}

@@ -3,7 +3,7 @@ extends Node3D
 const FlightModel = preload("res://scripts/flight_model.gd")
 
 ## Конус камеры и стрелки скорости и ветра. На расчёт полёта не влияют.
-## По умолчанию скрыты: раньше сплошной конус закрывал аппарат.
+## По умолчанию скрыты.
 
 var sensors_on := false
 var aero_on := false

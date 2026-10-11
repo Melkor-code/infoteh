@@ -40,7 +40,6 @@ static func envelope(kind: int) -> Dictionary:
 		leaf = minf(leaf, float(grown["leaf"]))
 		spine = maxf(spine, float(grown["spine"]))
 		radius = maxf(radius, float(grown["radius"]))
-	# Куст — препятствие целиком. Тонкий стебель аппарат не остановит, а в задании куст твёрдый.
 	if kind == 4:
 		radius = maxf(radius, reach * 0.38)
 		spine = maxf(spine, top * 0.72)

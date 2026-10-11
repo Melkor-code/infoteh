@@ -708,7 +708,7 @@ func _update_hud() -> void:
 
 
 func _build_wind_arrow() -> void:
-	# Короткая стрелка сбоку от площадки. Раньше была длинная плашка через старт.
+	# Короткая стрелка сбоку от площадки
 	wind_arrow = Node3D.new()
 	var paint := _flat_color(Color(0.35, 0.7, 0.95))
 	var shaft := MeshInstance3D.new()
@@ -814,7 +814,7 @@ func _take_sample() -> void:
 	if craft == null or sample_lines.size() >= 1200:
 		return
 	# Крен, тангаж, курс, батарея, моторы и сигнал — с шумом датчика, как на экране.
-	# Высота и скорость — из модели, без этого шума.
+	# Высота и скорость — из модели.
 	sample_lines.append("%.1f;%.2f;%.2f;%.1f;%.1f;%.1f;%.1f;%.1f;%.1f;%.2f;%.1f;%.2f" % [
 		flight_seconds,
 		craft.position.y,
@@ -891,7 +891,7 @@ func _save_log() -> void:
 	return
 
 
-# Отчёт собирает журнал событий и графики в одном HTML: жюри может прочитать ход полёта, не разбирая служебные файлы.
+# Отчёт собирает журнал событий и графики в одном HTML.
 func _write_report(folder: String) -> void:
 	if craft != null and sample_lines.is_empty():
 		_take_sample()

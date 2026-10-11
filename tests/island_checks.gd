@@ -3,8 +3,6 @@ extends SceneTree
 const Contacts = preload("res://scripts/map_contacts.gd")
 var failures := 0
 
-# Headless Godot has no physical keyboard. Inject only the input boundary;
-# the application's terrain sampling, substeps and collisions remain unchanged.
 class DrivenApp:
 	extends "res://scripts/app.gd"
 	var climb_input := 0.0

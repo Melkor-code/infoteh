@@ -1,6 +1,5 @@
 extends RefCounted
 
-# One snapshot feeds HUD, OSD and map. East +X, north -Z.
 static func capture(app: Node) -> Dictionary:
 	if not is_instance_valid(app.craft):
 		return {}

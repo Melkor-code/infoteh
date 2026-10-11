@@ -451,7 +451,6 @@ func _build_nature() -> void:
 			var crown_top := y + float(spec.top) * size
 			var reach := float(spec.reach) * size
 			# Коллизии берутся из тех же отрезков, из которых строится видимая кора.
-			# Поэтому вокруг веток больше нет невидимого куба/эллипсоида.
 			var tree_yaw := _rng.randf() * TAU
 			var tree_basis := Basis(Vector3.UP, tree_yaw).scaled(Vector3.ONE * size)
 			for segment in ProcTree.collision_segments(kind, variant):

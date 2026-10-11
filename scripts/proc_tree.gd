@@ -267,7 +267,6 @@ static func _leaves(tool: SurfaceTool, cursor: Dictionary, branch: Dictionary, t
 	var half_len := (back + forward) * 0.5
 	_card(tool, cursor, center, tangent, binormal, twig * 0.5, half_len, wind, shade)
 	_card(tool, cursor, center, bitangent, binormal, twig * 0.42, half_len * 0.92, wind, shade * 0.92)
-	# Третья карточка наклонена: сверху, с дрона, вертикальный крест был бы двумя линиями.
 	var tilt := _safe_norm(Vector3.UP * 0.72 + binormal * 0.38, Vector3.UP)
 	_card(tool, cursor, center + Vector3.UP * twig * 0.08, tangent, tilt, twig * 0.46, half_len * 0.72, wind, shade)
 

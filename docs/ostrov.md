@@ -25,3 +25,9 @@
 Проверочные изображения: `tests/output/island_top.png`, `island_overview.png`, `island_city.png`, `island_course.png`, `island_abdo.png`. Логи: `island_physics.log`, `island_checks.log`, `island_render.log`.
 
 Границы контакта с землёй используют ту же сетку, что и визуальный рельеф; высота покрытия стартовых площадок учитывается отдельно. Архив предыдущей карты: `../map-before-island-2026-10-06.zip`.
+
+# Карта острова
+
+Актуальное описание, расположение зон, точки старта и проверки: 
+
+Исходник: `scripts/island_field.gd`. Ресурсы растений: `assets/map/`. Контакты: `scripts/map_contacts.gd`.

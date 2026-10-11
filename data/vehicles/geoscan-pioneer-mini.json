@@ -1,0 +1,105 @@
+{
+  "id": "geoscan_pioneer_mini",
+  "display_name": "Геоскан Пионер Mini",
+  "disclaimer": "Не официальная модель Геоскана. Паспортные числа взяты из открытого PDF, остальное помечено отдельно.",
+  "mass_kg": {
+    "value": 0.1,
+    "origin": "passport",
+    "source": "https://download.geoscan.ru/pioneer/upload/Docs/Pioneer_Mini_tech_spec.pdf",
+    "comment": "Вес квадрокоптера 100 г. Максимальный взлётный вес в том же PDF — 120 г; в полёте считаем 100 г."
+  },
+  "dimensions_m": {
+    "length": {
+      "value": 0.175,
+      "origin": "passport",
+      "source": "https://download.geoscan.ru/pioneer/upload/Docs/Pioneer_Mini_tech_spec.pdf",
+      "comment": "Размеры 175×140×38 мм. Какая сторона длина, а какая ширина, PDF не уточняет; берём как написано."
+    },
+    "width": {
+      "value": 0.14,
+      "origin": "passport",
+      "source": "https://download.geoscan.ru/pioneer/upload/Docs/Pioneer_Mini_tech_spec.pdf",
+      "comment": "140 мм."
+    },
+    "height": {
+      "value": 0.038,
+      "origin": "passport",
+      "source": "https://download.geoscan.ru/pioneer/upload/Docs/Pioneer_Mini_tech_spec.pdf",
+      "comment": "38 мм."
+    }
+  },
+  "propeller_diameter_m": {
+    "value": 0.065,
+    "origin": "passport",
+    "source": "https://download.geoscan.ru/pioneer/upload/Docs/Pioneer_Mini_tech_spec.pdf",
+    "comment": "Диаметр воздушных винтов 65 мм."
+  },
+  "battery": {
+    "capacity_mah": {
+      "value": 1100,
+      "origin": "passport",
+      "source": "https://download.geoscan.ru/pioneer/upload/Docs/Pioneer_Mini_tech_spec.pdf",
+      "comment": "1100 мА·ч."
+    },
+    "voltage_v": {
+      "value": 3.7,
+      "origin": "passport",
+      "source": "https://download.geoscan.ru/pioneer/upload/Docs/Pioneer_Mini_tech_spec.pdf",
+      "comment": "Номинальное напряжение 3,7 В, одна банка."
+    },
+    "cells": {
+      "value": 1,
+      "origin": "passport",
+      "source": "https://download.geoscan.ru/pioneer/upload/Docs/Pioneer_Mini_tech_spec.pdf",
+      "comment": "Количество ячеек: 1."
+    }
+  },
+  "max_airspeed_m_s": {
+    "value": 5.56,
+    "origin": "passport",
+    "source": "https://download.geoscan.ru/pioneer/upload/Docs/Pioneer_Mini_tech_spec.pdf",
+    "comment": "Воздушная скорость 0–20 км/ч. 20 / 3.6 ≈ 5,56 м/с."
+  },
+  "max_wind_m_s": {
+    "value": null,
+    "origin": "missing",
+    "source": "https://download.geoscan.ru/pioneer/upload/Docs/Pioneer_Mini_tech_spec.pdf",
+    "comment": "Допустимого ветра в PDF нет. Пока порог предупреждения равен максимальной воздушной скорости: против более сильного ветра этот аппарат по паспорту не летит."
+  },
+  "operating_temperature_c": {
+    "min": 0,
+    "max": 40,
+    "origin": "passport",
+    "source": "https://download.geoscan.ru/pioneer/upload/Docs/Pioneer_Mini_tech_spec.pdf",
+    "comment": "От 0 до +40 °C."
+  },
+  "flight_time_s": {
+    "value": 600,
+    "origin": "passport",
+    "source": "https://download.geoscan.ru/pioneer/upload/Docs/Pioneer_Mini_tech_spec.pdf",
+    "comment": "Максимальная продолжительность полёта 10 мин. Это паспортный потолок, не обещание симулятора."
+  },
+  "camera_fov_deg": {
+    "value": 66,
+    "origin": "assumption",
+    "source": "",
+    "comment": "В открытом PDF угла обзора нет. 66° — условный угол для конуса камеры, не паспорт и не тяга."
+  },
+  "drag": {
+    "cd": {
+      "value": 1.0,
+      "origin": "assumption",
+      "source": "",
+      "comment": "В паспорте нет. Общее типовое значение для открытой рамы, одно на все модели."
+    },
+    "box_fill": {
+      "value": 0.35,
+      "origin": "assumption",
+      "source": "",
+      "comment": "Доля прямоугольника ширина×высота. Форму корпуса не описывает."
+    }
+  },
+  "visual_scene": "res://data/models/flight/drone.glb",
+  "visual_span_m": 0.175,
+  "visual_note": "Игровая модель. Масштаб по размаху; скрытые детали и высота приблизительные. На паспортную массу и калибровку сопротивления не влияет."
+}

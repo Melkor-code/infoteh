@@ -64,7 +64,7 @@ var autopilot_position := Vector3.ZERO
 var autopilot_heading := 0.0
 var navigation_lights: Node3D
 
-# Автопилот удерживает запомненные точку и курс регулятором; возврата домой здесь нет, потому что отдельного маршрута в ТЗ не задано.
+# Автопилот удерживает запомненные точку и курс регулятором.
 func set_autopilot(on: bool) -> bool:
 	if on and (not motors_on or ditched or battery <= 0.02):
 		return false

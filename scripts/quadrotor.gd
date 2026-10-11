@@ -316,7 +316,6 @@ func _update_sensors(delta: float, airspeed: float) -> void:
 	var target_temp := air_temp + 45.0 * throttle
 	motor_temp += (target_temp - motor_temp) * clampf(cool * delta, 0.0, 0.25)
 	var dist := Vector2(position.x, position.z).length()
-	# Поле стало просторнее, поэтому сигнал падает медленнее. На краю дорожки он ещё заметен.
 	radio = clampf(100.0 - dist * 0.16, 8.0, 100.0)
 	sensor_roll = rad_to_deg(roll) + randf_range(-0.4, 0.4)
 	sensor_pitch = rad_to_deg(pitch) + randf_range(-0.4, 0.4)

@@ -25,7 +25,7 @@ func run() -> void:
 		app.wind_speed = 0
 		for slider in app.wind_sliders:
 			slider.value = 0
-		# Drive the actual flight loop with input disabled for repeatability.
+		# Запускает цикл реального полета с отключенным входом для обеспечения повторяемости.
 		app.craft.position.y = 8.0
 		app.craft.target_altitude = 8.0
 		app.craft.motors_on = true
@@ -41,7 +41,7 @@ func run() -> void:
 		app._place_camera()
 		assert(not app.craft.visual.visible)
 		app._back_to_menu()
-	# Exercise every start zone and precipitation system through the application.
+	# Тренирует каждую стартовую зону и систему распределения осадков с помощью приложения.
 	for terrain in 2:
 		app.terrain = terrain
 		app._start_flight()

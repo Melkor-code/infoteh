@@ -23,5 +23,4 @@
 
 - Геоскан Пионер Mini: https://download.geoscan.ru/pioneer/upload/Docs/Pioneer_Mini_tech_spec.pdf
 - Геоскан Пионер FPV: https://download.geoscan.ru/pioneer/upload/Docs/Geoscan-Pioneer-FPV-characteristics.pdf?v3
-- Геоскан Пионер FPV: https://geoscan.education/pioneer-fpv
 - DJI Phantom 4 Pro: https://www.dji.com/support/product/phantom-4-pro
